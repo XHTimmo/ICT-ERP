@@ -48,8 +48,12 @@ function setupUpdater() {
   });
 
   autoUpdater.on('error', (err) => {
-    sendStatusToWindow('Error in auto-updater. ' + err);
-    sendEventToWindow('update-status', { status: 'error', error: err.message || err.toString() });
+    let message = err.message || err.toString();
+    if (message.includes('404') && message.includes('github.com')) {
+      message += '\n\n可能原因：\n1. GitHub 仓库是私有的 (Private)，请在 GitHub 设置中将其改为公开 (Public)。\n2. 发布配置错误，请检查 package.json 中的 repository 配置。';
+    }
+    sendStatusToWindow('Error in auto-updater. ' + message);
+    sendEventToWindow('update-status', { status: 'error', error: message });
     log.error(err);
   });
 
