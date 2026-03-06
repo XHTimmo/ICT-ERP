@@ -49,7 +49,8 @@ function setupUpdater() {
 
   autoUpdater.on('error', (err) => {
     sendStatusToWindow('Error in auto-updater. ' + err);
-    sendEventToWindow('update-status', { status: 'error', error: err.message });
+    sendEventToWindow('update-status', { status: 'error', error: err.message || err.toString() });
+    log.error(err);
   });
 
   autoUpdater.on('download-progress', (progressObj) => {
