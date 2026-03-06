@@ -1,6 +1,6 @@
 {
   "name": "erp-system",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "description": "A simple ERP system for reimbursement management",
   "main": "src/main/index.js",
   "scripts": {
@@ -48,7 +48,8 @@
       {
         "provider": "github",
         "owner": "XHTimmo",
-        "repo": "ICT-ERP"
+        "repo": "ICT-ERP",
+        "releaseType": "release"
       }
     ],
     "productName": "ERP System",
@@ -68,7 +69,10 @@
       "deleteAppDataOnUninstall": false
     },
     "mac": {
-      "target": ["dmg", "zip"]
+      "target": [
+        "dmg",
+        "zip"
+      ]
     },
     "win": {
       "target": "nsis"
