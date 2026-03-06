@@ -36,21 +36,21 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
         with:
-          node-version: 20
-          cache: 'npm'
+          bun-version: latest
 
       - name: Install dependencies
-        run: npm install
+        run: bun install --frozen-lockfile
 
       - name: Update version from tag (Unix)
         if: runner.os != 'Windows'
         run: |
           if [[ $GITHUB_REF == refs/tags/* ]]; then
             VERSION=${GITHUB_REF#refs/tags/v}
-            npm version $VERSION --no-git-tag-version --allow-same-version
+            # Update version in package.json using Node.js (available on runner)
+            node -e "const fs=require('fs'); const pkg=JSON.parse(fs.readFileSync('package.json')); pkg.version='$VERSION'; fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2));"
           fi
 
       - name: Update version from tag (Windows)
@@ -59,10 +59,11 @@ jobs:
         run: |
           if ($env:GITHUB_REF -match "refs/tags/v(.+)") {
             $VERSION = $Matches[1]
-            npm version $VERSION --no-git-tag-version --allow-same-version
+            # Update version in package.json using Node.js
+            node -e "const fs=require('fs'); const pkg=JSON.parse(fs.readFileSync('package.json')); pkg.version='$VERSION'; fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2));"
           }
 
       - name: Build and Publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run build -- --publish always
+        run: bun run build -- --publish always

@@ -113,9 +113,9 @@ v1.2.0 版本在 v1.1.0 的基础上，重点增强了**版本管理与发布流
 
 ## 6. 构建与发布 (Build & Release)
 
-- **开发**: `npm run dev`
+- **开发**: `bun run dev`
 - **构建**:
-  - 本地构建: `npm run build`
+  - 本地构建: `bun run build`
   - 自动发布: `git tag v1.2.0 && git push origin v1.2.0`
 - **配置**: `package.json` 中配置了 `electron-builder`，支持 `nsis` (Windows) 和 `dmg` (macOS)。
 
