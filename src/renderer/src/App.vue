@@ -2,7 +2,7 @@
   <el-container class="layout-container">
     <el-header>
       <div class="header-content">
-        <h1>ERP 报销管理系统</h1>
+        <h1>ERP 报销管理系统 <small class="version" v-if="appVersion">v{{ appVersion }}</small></h1>
         <el-menu mode="horizontal" :default-active="activeTab" @select="handleSelect">
           <el-menu-item index="dashboard">看板</el-menu-item>
           <el-menu-item index="list">报销列表</el-menu-item>
@@ -29,6 +29,7 @@ import ReimbursementForm from './components/ReimbursementForm.vue';
 import Settings from './components/Settings.vue';
 
 const activeTab = ref('dashboard');
+const appVersion = ref('');
 
 const handleSelect = (key) => {
   activeTab.value = key;
@@ -39,10 +40,16 @@ const fetchData = () => {
 };
 
 // Auto Update Logic
- const cleanup = ref(null);
+const cleanup = ref(null);
 
- onMounted(() => {
-   if (window.api && window.api.onUpdateStatus) {
+onMounted(async () => {
+  // Get app version
+  if (window.api && window.api.getAppVersion) {
+    const version = await window.api.getAppVersion();
+    if (version) appVersion.value = version;
+  }
+
+  if (window.api && window.api.onUpdateStatus) {
      cleanup.value = window.api.onUpdateStatus((data) => {
        console.log('Update status:', data);
        
@@ -104,5 +111,15 @@ const fetchData = () => {
   justify-content: space-between;
   border-bottom: 1px solid #dcdfe6;
   padding: 0 20px;
+}
+.header-content h1 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.version {
+  font-size: 14px;
+  color: #909399;
+  font-weight: normal;
 }
 </style>

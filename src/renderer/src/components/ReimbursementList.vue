@@ -72,8 +72,8 @@
         </template>
       </el-table-column>
       <el-table-column prop="date" label="日期" width="120" sortable />
-      <el-table-column prop="name" label="报销名称" width="150" />
-      <el-table-column prop="status" label="状态" width="140">
+      <el-table-column prop="name" label="报销名称" width="150" sortable />
+      <el-table-column prop="status" label="状态" width="140" sortable>
         <template #default="scope">
           <el-select 
             v-model="scope.row.status" 
@@ -88,7 +88,7 @@
           </el-select>
         </template>
       </el-table-column>
-      <el-table-column prop="category" label="类别" width="100" />
+      <el-table-column prop="category" label="类别" width="100" sortable />
       <el-table-column prop="amount" label="金额" width="120" sortable>
         <template #default="scope">
           ¥ {{ scope.row.amount.toFixed(2) }}

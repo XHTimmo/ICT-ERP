@@ -20,8 +20,25 @@
       </el-form-item>
 
       <el-form-item label="报销类别" prop="category">
-        <el-select v-model="form.category" placeholder="请选择或输入类别" allow-create filterable default-first-option>
-          <el-option v-for="opt in categoryOptions" :key="opt" :label="opt" :value="opt" />
+        <el-select 
+          v-model="form.category" 
+          placeholder="请选择或输入类别" 
+          allow-create 
+          filterable 
+          default-first-option
+          @change="handleCategoryChange"
+        >
+          <el-option 
+            v-for="opt in categoryOptions" 
+            :key="opt.id" 
+            :label="opt.name" 
+            :value="opt.name" 
+          >
+            <div class="category-option">
+              <span>{{ opt.name }}</span>
+              <el-icon class="delete-icon" @click.stop="deleteCategory(opt)"><Close /></el-icon>
+            </div>
+          </el-option>
         </el-select>
       </el-form-item>
       
@@ -107,15 +124,65 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import { Upload, Close } from '@element-plus/icons-vue';
 
 const emit = defineEmits(['success']);
 
 const formRef = ref(null);
 const loading = ref(false);
-const defaultCategories = ['差旅费', '办公用品', '招待费', '团建费', '其他'];
-const categoryOptions = ref([...defaultCategories]);
+const categoryOptions = ref([]);
+
+const loadCategories = async () => {
+  try {
+    const categories = await window.api.getCategories();
+    categoryOptions.value = categories;
+  } catch (error) {
+    console.error('Failed to load categories:', error);
+  }
+};
+
+const handleCategoryChange = async (val) => {
+  // Check if new category
+  if (val && !categoryOptions.value.find(c => c.name === val)) {
+    try {
+      const newCategory = await window.api.addCategory(val);
+      categoryOptions.value.push(newCategory);
+      // Re-sort
+      categoryOptions.value.sort((a, b) => a.sort_order - b.sort_order);
+      ElMessage.success(`已添加新类别: ${val}`);
+    } catch (error) {
+      ElMessage.error(error.message || '添加类别失败');
+      form.category = ''; // Clear invalid input
+    }
+  }
+};
+
+const deleteCategory = async (category) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除类别 "${category.name}" 吗？`,
+      '删除确认',
+      {
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+      }
+    );
+    
+    await window.api.deleteCategory(category.id);
+    ElMessage.success('类别已删除');
+    if (form.category === category.name) {
+      form.category = '';
+    }
+    await loadCategories();
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('Failed to delete category:', error);
+      ElMessage.error('删除类别失败');
+    }
+  }
+};
 
 const dragOver = reactive({
   physical_photo: false,
@@ -143,6 +210,10 @@ const rules = {
   name: [{ required: true, message: '请输入报销名称', trigger: 'blur' }],
   // Custom validation for proofs
 };
+
+onMounted(() => {
+  loadCategories();
+});
 
 const selectFile = async (type, extensions) => {
   try {
@@ -258,76 +329,83 @@ onMounted(async () => {
 
 <style scoped>
 .form-card {
-  max-width: 1000px;
-  margin: 0 auto;
+  margin-bottom: 20px;
 }
-
 .card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
-
 .upload-area {
-  border: 1px dashed #d9d9d9;
-  border-radius: 6px;
-  cursor: pointer;
-  position: relative;
-  overflow: hidden;
-  transition: var(--el-transition-duration-fast);
+  border: 1px dashed #dcdfe6;
+  border-radius: 4px;
+  padding: 20px;
   text-align: center;
-  padding: 20px 10px;
+  cursor: pointer;
+  transition: border-color 0.3s;
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
 }
-
 .upload-area:hover, .upload-area.is-dragover {
-  border-color: var(--el-color-primary);
-  background-color: var(--el-color-primary-light-9);
+  border-color: #409eff;
 }
-
 .upload-icon {
   font-size: 28px;
   color: #8c939d;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
-
 .upload-text {
   color: #606266;
   font-size: 12px;
-  margin-bottom: 8px;
 }
-
 .file-list {
-  text-align: left;
   margin-top: 10px;
-  max-height: 100px;
-  overflow-y: auto;
+  width: 100%;
+  text-align: left;
 }
-
 .file-item {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  font-size: 12px;
-  color: var(--el-color-primary);
-  margin-bottom: 4px;
-  padding: 2px 4px;
-  background: #f5f7fa;
-  border-radius: 4px;
+  justify-content: space-between;
+  padding: 2px 5px;
+  background-color: #f5f7fa;
+  border-radius: 2px;
+  margin-bottom: 2px;
 }
-
 .file-name {
+  font-size: 12px;
+  color: #606266;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 80%;
 }
-
 .remove-icon {
   cursor: pointer;
   color: #909399;
+  font-size: 12px;
 }
-
 .remove-icon:hover {
   color: #f56c6c;
+}
+.category-option {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+.delete-icon {
+  color: #909399;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px;
+}
+.delete-icon:hover {
+  color: #f56c6c;
+  background-color: #fef0f0;
+  border-radius: 50%;
 }
 </style>

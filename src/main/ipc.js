@@ -3,7 +3,7 @@ const path = require('path');
 const fs = require('fs-extra');
 const { v4: uuidv4 } = require('uuid');
 const Store = require('electron-store');
-const { initDB, addReimbursement, getReimbursements, getReimbursement, updateReimbursementStatus, deleteReimbursement, updateReimbursementProofs, updateReimbursementAmount, updateReimbursement, getDashboardStats, getCategories } = require('./database');
+const { initDB, addReimbursement, getReimbursements, getReimbursement, updateReimbursementStatus, deleteReimbursement, updateReimbursementProofs, updateReimbursementAmount, updateReimbursement, getDashboardStats, getCategories, addCategory, deleteCategory, updateCategoryOrder } = require('./database');
 const archiver = require('archiver');
 const { createWriteStream } = require('fs');
 
@@ -65,6 +65,46 @@ function setupIPC(mainWindow) {
       return getCategories();
     } catch (error) {
       console.error('Error getting categories:', error);
+      throw error;
+    }
+  });
+
+  // Add Category
+  ipcMain.handle('add-category', (event, name) => {
+    try {
+      const storagePath = store.get('storagePath');
+      if (!storagePath) throw new Error('Storage path not set');
+      initDB(storagePath);
+      return addCategory(name);
+    } catch (error) {
+      console.error('Error adding category:', error);
+      throw error;
+    }
+  });
+
+  // Delete Category
+  ipcMain.handle('delete-category', (event, id) => {
+    try {
+      const storagePath = store.get('storagePath');
+      if (!storagePath) throw new Error('Storage path not set');
+      initDB(storagePath);
+      return deleteCategory(id);
+    } catch (error) {
+      console.error('Error deleting category:', error);
+      throw error;
+    }
+  });
+
+  // Update Category Order
+  ipcMain.handle('update-category-order', (event, categories) => {
+    try {
+      const storagePath = store.get('storagePath');
+      if (!storagePath) throw new Error('Storage path not set');
+      initDB(storagePath);
+      updateCategoryOrder(categories);
+      return true;
+    } catch (error) {
+      console.error('Error updating category order:', error);
       throw error;
     }
   });

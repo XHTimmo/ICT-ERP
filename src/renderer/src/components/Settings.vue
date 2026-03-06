@@ -24,16 +24,105 @@
           所有报销数据和凭证文件将存储在此目录下的 <code>db</code> 和 <code>attachments</code> 文件夹中。
         </div>
       </el-form-item>
+
+      <el-form-item label="报销类别管理">
+        <div class="category-manager">
+          <div class="category-input">
+            <el-input 
+              v-model="newCategoryName" 
+              placeholder="输入新类别名称" 
+              style="width: 200px"
+              @keyup.enter="handleAddCategory"
+            >
+              <template #append>
+                <el-button @click="handleAddCategory">添加</el-button>
+              </template>
+            </el-input>
+          </div>
+          
+          <el-table 
+            :data="categories" 
+            style="width: 100%; margin-top: 10px" 
+            border 
+            size="small"
+            empty-text="暂无类别"
+          >
+            <el-table-column prop="name" label="类别名称" />
+            <el-table-column label="操作" width="100" align="center">
+              <template #default="scope">
+                <el-button 
+                  type="danger" 
+                  link 
+                  size="small" 
+                  @click="handleDeleteCategory(scope.row)"
+                >
+                  删除
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+      </el-form-item>
     </el-form>
   </el-card>
 </template>
 
 <script setup>
 import { ref, onMounted } from 'vue';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 
 const storagePath = ref('');
 const appVersion = ref('');
+const categories = ref([]);
+const newCategoryName = ref('');
+
+const loadCategories = async () => {
+  try {
+    const list = await window.api.getCategories();
+    categories.value = list;
+  } catch (error) {
+    console.error('Failed to load categories:', error);
+  }
+};
+
+const handleAddCategory = async () => {
+  const name = newCategoryName.value.trim();
+  if (!name) {
+    ElMessage.warning('请输入类别名称');
+    return;
+  }
+  
+  try {
+    await window.api.addCategory(name);
+    ElMessage.success('添加成功');
+    newCategoryName.value = '';
+    await loadCategories();
+  } catch (error) {
+    ElMessage.error(error.message || '添加失败');
+  }
+};
+
+const handleDeleteCategory = async (row) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除类别 "${row.name}" 吗？`,
+      '删除确认',
+      {
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+      }
+    );
+    
+    await window.api.deleteCategory(row.id);
+    ElMessage.success('删除成功');
+    await loadCategories();
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('删除失败');
+    }
+  }
+};
 
 const loadSettings = async () => {
   try {
@@ -42,6 +131,8 @@ const loadSettings = async () => {
     
     const version = await window.api.getAppVersion();
     if (version) appVersion.value = version;
+
+    await loadCategories();
   } catch (error) {
     ElMessage.error('加载设置失败');
   }

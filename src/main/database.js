@@ -42,7 +42,27 @@ function initDB(storagePath) {
         created_at INTEGER,
         FOREIGN KEY(reimbursement_id) REFERENCES reimbursements(id)
       );
+
+      CREATE TABLE IF NOT EXISTS categories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT UNIQUE NOT NULL,
+        sort_order INTEGER DEFAULT 0,
+        created_at INTEGER
+      );
     `);
+    
+    // Initialize default categories if table is empty
+    const categoryCount = db.prepare('SELECT COUNT(*) as count FROM categories').get().count;
+    if (categoryCount === 0) {
+      const defaultCategories = ['办公用品', '餐饮', '交通', '住宿', '团建', '其他'];
+      const insert = db.prepare('INSERT INTO categories (name, sort_order, created_at) VALUES (?, ?, ?)');
+      const now = Date.now();
+      db.transaction(() => {
+        defaultCategories.forEach((cat, index) => {
+          insert.run(cat, index, now);
+        });
+      })();
+    }
     
     // Migration: Add status column if not exists (simple check)
     try {
@@ -252,8 +272,35 @@ function getReimbursements() {
 }
 
 function getCategories() {
-  const rows = getDB().prepare('SELECT DISTINCT category FROM reimbursements WHERE category IS NOT NULL AND category != ""').all();
-  return rows.map(r => r.category);
+  return getDB().prepare('SELECT * FROM categories ORDER BY sort_order ASC, created_at ASC').all();
+}
+
+function addCategory(name) {
+  try {
+    const count = getDB().prepare('SELECT COUNT(*) as count FROM categories').get().count;
+    const stmt = getDB().prepare('INSERT INTO categories (name, sort_order, created_at) VALUES (?, ?, ?)');
+    const info = stmt.run(name, count, Date.now());
+    return { id: info.lastInsertRowid, name, sort_order: count, created_at: Date.now() };
+  } catch (error) {
+    if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+      throw new Error('类别名称已存在');
+    }
+    throw error;
+  }
+}
+
+function deleteCategory(id) {
+  return getDB().prepare('DELETE FROM categories WHERE id = ?').run(id);
+}
+
+function updateCategoryOrder(categories) {
+  const update = getDB().prepare('UPDATE categories SET sort_order = ? WHERE id = ?');
+  const transaction = getDB().transaction((cats) => {
+    cats.forEach((cat, index) => {
+      update.run(index, cat.id);
+    });
+  });
+  transaction(categories);
 }
 
 function getDashboardStats() {
@@ -303,5 +350,8 @@ module.exports = {
   updateReimbursement,
   deleteReimbursement,
   getDashboardStats,
-  getCategories
+  getCategories,
+  addCategory,
+  deleteCategory,
+  updateCategoryOrder
 };
