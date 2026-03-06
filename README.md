@@ -27,17 +27,17 @@
 ### 1. 安装依赖
 
 ```bash
-npm install
+bun install
 ```
 
-> 注意: 由于使用了 `better-sqlite3`，安装过程可能会触发原生模块编译。如果不成功，请尝试 `npm run postinstall`。
+> 注意: 由于使用了 `better-sqlite3`，安装过程可能会触发原生模块编译。如果不成功，请尝试 `bun run postinstall`。
 
 ### 2. 开发模式
 
 同时启动 Vite 开发服务器和 Electron 主进程：
 
 ```bash
-npm run electron:dev
+bun run electron:dev
 ```
 
 ### 3. 构建打包
@@ -45,7 +45,7 @@ npm run electron:dev
 构建 Windows 安装包 (需在 Windows 环境下或使用 Wine):
 
 ```bash
-npm run build
+bun run build
 ```
 
 ## 项目结构
