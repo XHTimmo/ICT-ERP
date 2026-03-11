@@ -48,6 +48,24 @@
             empty-text="暂无类别"
           >
             <el-table-column prop="name" label="类别名称" />
+            <el-table-column label="排序" width="120" align="center">
+              <template #default="scope">
+                <el-button-group>
+                  <el-button 
+                    size="small" 
+                    :icon="Top"
+                    :disabled="scope.$index === 0"
+                    @click="moveCategory(scope.$index, -1)"
+                  />
+                  <el-button 
+                    size="small" 
+                    :icon="Bottom"
+                    :disabled="scope.$index === categories.length - 1"
+                    @click="moveCategory(scope.$index, 1)"
+                  />
+                </el-button-group>
+              </template>
+            </el-table-column>
             <el-table-column label="操作" width="100" align="center">
               <template #default="scope">
                 <el-button 
@@ -63,6 +81,41 @@
           </el-table>
         </div>
       </el-form-item>
+      <el-form-item label="状态排序设置">
+        <div class="status-manager">
+          <el-table 
+            :data="statusOrder" 
+            style="width: 100%" 
+            border 
+            size="small"
+          >
+            <el-table-column label="状态名称">
+              <template #default="scope">
+                {{ scope.row }}
+              </template>
+            </el-table-column>
+            <el-table-column label="排序" width="120" align="center">
+              <template #default="scope">
+                <el-button-group>
+                  <el-button 
+                    size="small" 
+                    :icon="Top"
+                    :disabled="scope.$index === 0"
+                    @click="moveStatus(scope.$index, -1)"
+                  />
+                  <el-button 
+                    size="small" 
+                    :icon="Bottom"
+                    :disabled="scope.$index === statusOrder.length - 1"
+                    @click="moveStatus(scope.$index, 1)"
+                  />
+                </el-button-group>
+              </template>
+            </el-table-column>
+          </el-table>
+          <div class="tip">调整状态在列表中的显示优先级（越靠前优先级越高）</div>
+        </div>
+      </el-form-item>
     </el-form>
   </el-card>
 </template>
@@ -70,10 +123,12 @@
 <script setup>
 import { ref, onMounted } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import { Top, Bottom } from '@element-plus/icons-vue';
 
 const storagePath = ref('');
 const appVersion = ref('');
 const categories = ref([]);
+const statusOrder = ref([]);
 const newCategoryName = ref('');
 
 const loadCategories = async () => {
@@ -82,6 +137,55 @@ const loadCategories = async () => {
     categories.value = list;
   } catch (error) {
     console.error('Failed to load categories:', error);
+  }
+};
+
+const loadStatusOrder = async () => {
+  try {
+    const order = await window.api.getStatusOrder();
+    statusOrder.value = order;
+  } catch (error) {
+    console.error('Failed to load status order:', error);
+  }
+};
+
+const moveCategory = async (index, direction) => {
+  const newIndex = index + direction;
+  if (newIndex < 0 || newIndex >= categories.value.length) return;
+  
+  const item = categories.value[index];
+  const newCategories = [...categories.value];
+  newCategories.splice(index, 1);
+  newCategories.splice(newIndex, 0, item);
+  
+  categories.value = newCategories;
+  
+  try {
+    await window.api.updateCategoryOrder(newCategories);
+    ElMessage.success('顺序已更新');
+  } catch (error) {
+    ElMessage.error('更新顺序失败');
+    await loadCategories(); // Revert
+  }
+};
+
+const moveStatus = async (index, direction) => {
+  const newIndex = index + direction;
+  if (newIndex < 0 || newIndex >= statusOrder.value.length) return;
+  
+  const item = statusOrder.value[index];
+  const newOrder = [...statusOrder.value];
+  newOrder.splice(index, 1);
+  newOrder.splice(newIndex, 0, item);
+  
+  statusOrder.value = newOrder;
+  
+  try {
+    await window.api.setStatusOrder(newOrder);
+    ElMessage.success('状态顺序已更新');
+  } catch (error) {
+    ElMessage.error('更新状态顺序失败');
+    await loadStatusOrder(); // Revert
   }
 };
 
@@ -133,6 +237,7 @@ const loadSettings = async () => {
     if (version) appVersion.value = version;
 
     await loadCategories();
+    await loadStatusOrder();
   } catch (error) {
     ElMessage.error('加载设置失败');
   }

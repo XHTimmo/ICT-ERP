@@ -324,9 +324,14 @@ function getDashboardStats() {
   // Recent 5 items
   const recentItems = db.prepare('SELECT id, name, date, amount, status FROM reimbursements ORDER BY created_at DESC LIMIT 5').all();
   
-  // Monthly stats for the last 6 months (Keeping this new addition as it might be useful, or should I remove it if not used? Dashboard.vue doesn't seem to use it based on previous read, but let's check Dashboard.vue again. 
-  // Wait, Dashboard.vue ONLY uses: totalAmount, totalCount, categoryStats, statusStats, recentItems, unfinishedTotalAmount, unfinishedByCategory.
-  // It does NOT use monthlyStats. So I should stick to what Dashboard.vue expects.)
+  // Monthly stats for the last 6 months
+  const monthlyStats = db.prepare(`
+    SELECT strftime('%Y-%m', date) as month, SUM(amount) as totalAmount, COUNT(*) as count 
+    FROM reimbursements 
+    WHERE date >= date('now', 'start of month', '-5 months') 
+    GROUP BY month 
+    ORDER BY month ASC
+  `).all();
 
   return {
     totalCount: totalStats.count || 0,
@@ -335,7 +340,8 @@ function getDashboardStats() {
     statusStats,
     unfinishedTotalAmount: unfinishedTotal.totalAmount || 0,
     unfinishedByCategory,
-    recentItems
+    recentItems,
+    monthlyStats
   };
 }
 

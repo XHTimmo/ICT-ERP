@@ -3,14 +3,12 @@
     <div class="header">
       <h2>数据看板</h2>
       <div class="actions">
-        <el-switch v-model="editMode" active-text="布局编辑" inactive-text="浏览模式" />
         <el-button type="primary" @click="fetchStats">刷新数据</el-button>
-        <el-button v-if="editMode" @click="resetLayout">重置布局</el-button>
       </div>
     </div>
 
-    <div class="widgets" :class="{ editing: editMode }" @keydown="onKey" tabindex="0">
-      <div :style="widgetStyle('totalAmount')" :class="[widgetClass, activeId==='totalAmount' && editMode ? 'active' : '']" ref="el_totalAmount" data-id="totalAmount" @click="setActive('totalAmount')">
+    <div class="widgets" tabindex="0">
+      <div :style="widgetStyle('totalAmount')" :class="widgetClass" ref="el_totalAmount">
         <el-card shadow="hover">
           <template #header>
             <div class="card-header">
@@ -19,10 +17,9 @@
           </template>
           <div class="card-value">¥ {{ stats.totalAmount.toFixed(2) }}</div>
         </el-card>
-        <div v-if="editMode" class="badge">{{ cellSize('totalAmount') }}</div>
       </div>
 
-      <div :style="widgetStyle('totalCount')" :class="[widgetClass, activeId==='totalCount' && editMode ? 'active' : '']" ref="el_totalCount" data-id="totalCount" @click="setActive('totalCount')">
+      <div :style="widgetStyle('totalCount')" :class="widgetClass" ref="el_totalCount">
         <el-card shadow="hover">
           <template #header>
             <div class="card-header">
@@ -31,10 +28,9 @@
           </template>
           <div class="card-value">{{ stats.totalCount }} 单</div>
         </el-card>
-        <div v-if="editMode" class="badge">{{ cellSize('totalCount') }}</div>
       </div>
 
-      <div :style="widgetStyle('unfinishedTotal')" :class="[widgetClass, activeId==='unfinishedTotal' && editMode ? 'active' : '']" ref="el_unfinishedTotal" data-id="unfinishedTotal" @click="setActive('unfinishedTotal')">
+      <div :style="widgetStyle('unfinishedTotal')" :class="widgetClass" ref="el_unfinishedTotal">
         <el-card shadow="hover">
           <template #header>
             <div class="card-header">
@@ -43,10 +39,15 @@
           </template>
           <div class="card-value danger">¥ {{ (stats.unfinishedTotalAmount || 0).toFixed(2) }}</div>
         </el-card>
-        <div v-if="editMode" class="badge">{{ cellSize('unfinishedTotal') }}</div>
       </div>
 
-      <div :style="widgetStyle('categoryStats')" :class="[widgetClass, activeId==='categoryStats' && editMode ? 'active' : '']" ref="el_categoryStats" data-id="categoryStats" @click="setActive('categoryStats')">
+      <div :style="widgetStyle('monthlyChart')" :class="widgetClass" ref="el_monthlyChart">
+        <el-card class="box-card" header="月度报销趋势">
+          <div ref="monthlyChartRef" class="pie-container"></div>
+        </el-card>
+      </div>
+
+      <div :style="widgetStyle('categoryStats')" :class="widgetClass" ref="el_categoryStats">
         <el-card class="box-card" header="按类别统计">
           <el-table :data="stats.categoryStats" style="width: 100%" stripe>
             <el-table-column prop="category" label="类别" />
@@ -58,10 +59,9 @@
             </el-table-column>
           </el-table>
         </el-card>
-        <div v-if="editMode" class="badge">{{ cellSize('categoryStats') }}</div>
       </div>
       
-      <div :style="widgetStyle('statusStats')" :class="[widgetClass, activeId==='statusStats' && editMode ? 'active' : '']" ref="el_statusStats" data-id="statusStats" @click="setActive('statusStats')">
+      <div :style="widgetStyle('statusStats')" :class="widgetClass" ref="el_statusStats">
         <el-card class="box-card" header="按状态统计">
           <el-table :data="stats.statusStats" style="width: 100%" stripe>
             <el-table-column prop="status" label="状态" />
@@ -73,17 +73,27 @@
             </el-table-column>
           </el-table>
         </el-card>
-        <div v-if="editMode" class="badge">{{ cellSize('statusStats') }}</div>
       </div>
 
-      <div :style="widgetStyle('unfinishedPie')" :class="[widgetClass, activeId==='unfinishedPie' && editMode ? 'active' : '']" ref="el_unfinishedPie" data-id="unfinishedPie" @click="setActive('unfinishedPie')">
+      <div :style="widgetStyle('categoryPie')" :class="widgetClass" ref="el_categoryPie">
+        <el-card class="box-card" header="全类别金额占比">
+          <div ref="categoryPieRef" class="pie-container"></div>
+        </el-card>
+      </div>
+
+      <div :style="widgetStyle('statusPie')" :class="widgetClass" ref="el_statusPie">
+        <el-card class="box-card" header="全状态数量占比">
+          <div ref="statusPieRef" class="pie-container"></div>
+        </el-card>
+      </div>
+
+      <div :style="widgetStyle('unfinishedPie')" :class="widgetClass" ref="el_unfinishedPie">
         <el-card class="box-card" header="未完成按类别占比">
           <div ref="pieRef" class="pie-container"></div>
         </el-card>
-        <div v-if="editMode" class="badge">{{ cellSize('unfinishedPie') }}</div>
       </div>
 
-      <div :style="widgetStyle('recentItems')" :class="[widgetClass, activeId==='recentItems' && editMode ? 'active' : '']" ref="el_recentItems" data-id="recentItems" @click="setActive('recentItems')">
+      <div :style="widgetStyle('recentItems')" :class="widgetClass" ref="el_recentItems">
         <el-card class="box-card recent-card" header="最近新增">
           <el-table :data="stats.recentItems" style="width: 100%" stripe>
             <el-table-column prop="date" label="日期" width="120" />
@@ -100,17 +110,15 @@
             </el-table-column>
           </el-table>
         </el-card>
-        <div v-if="editMode" class="badge">{{ cellSize('recentItems') }}</div>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, watch, onBeforeUnmount } from 'vue';
+import { ref, onMounted, watch, onBeforeUnmount } from 'vue';
 import { ElMessage } from 'element-plus';
 import * as echarts from 'echarts';
-import interact from 'interactjs';
 
 const stats = ref({
   totalAmount: 0,
@@ -119,47 +127,40 @@ const stats = ref({
   statusStats: [],
   recentItems: [],
   unfinishedTotalAmount: 0,
-  unfinishedByCategory: []
+  unfinishedByCategory: [],
+  monthlyStats: []
 });
 
 const pieRef = ref(null);
-let pieChart = null;
+const monthlyChartRef = ref(null);
+const categoryPieRef = ref(null);
+const statusPieRef = ref(null);
 
-const editMode = ref(false);
+let pieChart = null;
+let monthlyChart = null;
+let categoryPieChart = null;
+let statusPieChart = null;
+
 const widgetClass = 'widget';
-const GRID = 20;
 const defaultLayout = {
   totalAmount: { x: 0, y: 0, w: 380, h: 120 },
   totalCount: { x: 400, y: 0, w: 380, h: 120 },
   unfinishedTotal: { x: 800, y: 0, w: 380, h: 120 },
-  categoryStats: { x: 0, y: 140, w: 580, h: 320 },
-  statusStats: { x: 600, y: 140, w: 580, h: 320 },
-  unfinishedPie: { x: 0, y: 480, w: 580, h: 340 },
-  recentItems: { x: 600, y: 480, w: 580, h: 340 }
+  
+  monthlyChart: { x: 0, y: 140, w: 1180, h: 300 },
+  
+  categoryStats: { x: 0, y: 460, w: 580, h: 320 },
+  statusStats: { x: 600, y: 460, w: 580, h: 320 },
+  
+  categoryPie: { x: 0, y: 800, w: 380, h: 300 },
+  statusPie: { x: 400, y: 800, w: 380, h: 300 },
+  unfinishedPie: { x: 800, y: 800, w: 380, h: 300 },
+  
+  recentItems: { x: 0, y: 1120, w: 1180, h: 300 }
 };
-const layout = reactive(loadLayout());
-const activeId = ref('');
 
-function loadLayout() {
-  try {
-    const saved = localStorage.getItem('dashboardLayout');
-    if (saved) return JSON.parse(saved);
-  } catch {}
-  return { ...defaultLayout };
-}
-function saveLayout() {
-  localStorage.setItem('dashboardLayout', JSON.stringify(layout));
-}
-function resetLayout() {
-  Object.assign(layout, { ...defaultLayout });
-  saveLayout();
-  nextTickResize();
-}
-function setActive(id) {
-  activeId.value = id;
-}
 function widgetStyle(id) {
-  const it = layout[id] || defaultLayout[id];
+  const it = defaultLayout[id];
   if (!it) return {};
   return {
     left: it.x + 'px',
@@ -167,85 +168,6 @@ function widgetStyle(id) {
     width: it.w + 'px',
     height: it.h + 'px'
   };
-}
-function cellSize(id) {
-  const it = layout[id] || defaultLayout[id];
-  if (!it) return '';
-  return Math.round(it.w / GRID) + '×' + Math.round(it.h / GRID);
-}
-
-function initInteract() {
-  const selector = '.widgets.editing .widget';
-  interact(selector)
-    .draggable({
-      inertia: false,
-      modifiers: [
-        interact.modifiers.snap({
-          targets: [interact.snappers.grid({ x: GRID, y: GRID })],
-          range: GRID / 2,
-        })
-      ],
-      listeners: {
-        move (event) {
-          const target = event.target;
-          const id = target.getAttribute('data-id');
-          if (!id) return;
-          const l = layout[id];
-          l.x = Math.max(0, l.x + event.dx);
-          l.y = Math.max(0, l.y + event.dy);
-          // snap to grid
-          l.x = Math.round(l.x / GRID) * GRID;
-          l.y = Math.round(l.y / GRID) * GRID;
-          target.style.left = l.x + 'px';
-          target.style.top = l.y + 'px';
-        },
-        end () { saveLayout(); }
-      }
-    })
-    .resizable({
-      edges: { left: true, right: true, bottom: true, top: false },
-      modifiers: [
-        interact.modifiers.snapSize({
-          targets: [interact.snappers.grid({ x: GRID, y: GRID })]
-        })
-      ]
-    })
-    .on('resizemove', (event) => {
-      const target = event.target;
-      const id = target.getAttribute('data-id');
-      if (!id) return;
-      const l = layout[id];
-      l.w = Math.max(GRID * 8, Math.round(event.rect.width / GRID) * GRID);
-      l.h = Math.max(GRID * 6, Math.round(event.rect.height / GRID) * GRID);
-      target.style.width = l.w + 'px';
-      target.style.height = l.h + 'px';
-      saveLayout();
-      nextTickResize();
-    });
-}
-
-function destroyInteract() {
-  interact('.widgets.editing .widget').unset();
-}
-
-function nextTickResize() {
-  setTimeout(() => {
-    if (pieChart) pieChart.resize();
-  }, 0);
-}
-function onKey(e) {
-  if (!editMode.value || !activeId.value) return;
-  const id = activeId.value;
-  const l = layout[id];
-  if (!l) return;
-  if (e.key === 'ArrowLeft') l.x = Math.max(0, l.x - GRID);
-  else if (e.key === 'ArrowRight') l.x = l.x + GRID;
-  else if (e.key === 'ArrowUp') l.y = Math.max(0, l.y - GRID);
-  else if (e.key === 'ArrowDown') l.y = l.y + GRID;
-  else return;
-  e.preventDefault();
-  saveLayout();
-  nextTickResize();
 }
 
 const fetchStats = async () => {
@@ -269,55 +191,121 @@ const getStatusType = (status) => {
   return map[status] || 'info';
 };
 
-const renderPie = () => {
-  if (!pieRef.value) return;
-  if (!pieChart) {
-    pieChart = echarts.init(pieRef.value);
-  }
-  const seriesData = (stats.value.unfinishedByCategory || []).map(it => ({
-    name: it.category || '未分类',
-    value: it.totalAmount || 0
-  }));
-  const option = {
-    tooltip: { trigger: 'item' },
-    legend: { top: 'bottom' },
-    series: [
-      {
+const renderCharts = () => {
+  // 1. Unfinished Pie
+  if (pieRef.value) {
+    if (!pieChart) pieChart = echarts.init(pieRef.value);
+    const seriesData = (stats.value.unfinishedByCategory || []).map(it => ({
+      name: it.category || '未分类',
+      value: it.totalAmount || 0
+    }));
+    pieChart.setOption({
+      tooltip: { trigger: 'item', formatter: '{b}: ¥{c} ({d}%)' },
+      legend: { top: 'bottom', type: 'scroll' },
+      series: [{
         type: 'pie',
-        radius: ['30%', '70%'],
-        center: ['50%', '50%'],
-        roseType: false,
-        itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
-        data: seriesData
-      }
-    ]
-  };
-  pieChart.setOption(option);
+        radius: ['30%', '60%'],
+        center: ['50%', '45%'],
+        itemStyle: { borderRadius: 4, borderColor: '#fff', borderWidth: 2 },
+        data: seriesData,
+        label: { show: false }
+      }]
+    });
+  }
+
+  // 2. Monthly Trend (Line/Bar)
+  if (monthlyChartRef.value) {
+    if (!monthlyChart) monthlyChart = echarts.init(monthlyChartRef.value);
+    const months = (stats.value.monthlyStats || []).map(m => m.month);
+    const amounts = (stats.value.monthlyStats || []).map(m => m.totalAmount);
+    const counts = (stats.value.monthlyStats || []).map(m => m.count);
+    
+    monthlyChart.setOption({
+      tooltip: { trigger: 'axis' },
+      legend: { data: ['总金额', '单据数'], bottom: 0 },
+      grid: { left: '3%', right: '4%', bottom: '10%', containLabel: true },
+      xAxis: { type: 'category', data: months },
+      yAxis: [
+        { type: 'value', name: '金额', axisLabel: { formatter: '¥{value}' } },
+        { type: 'value', name: '数量', position: 'right' }
+      ],
+      series: [
+        { name: '总金额', type: 'bar', data: amounts, barMaxWidth: 40, itemStyle: { color: '#409EFF' } },
+        { name: '单据数', type: 'line', yAxisIndex: 1, data: counts, itemStyle: { color: '#67C23A' } }
+      ]
+    });
+  }
+
+  // 3. Category Pie (Total)
+  if (categoryPieRef.value) {
+    if (!categoryPieChart) categoryPieChart = echarts.init(categoryPieRef.value);
+    const catData = (stats.value.categoryStats || []).map(it => ({
+      name: it.category,
+      value: it.totalAmount
+    }));
+    categoryPieChart.setOption({
+      tooltip: { trigger: 'item', formatter: '{b}: ¥{c} ({d}%)' },
+      legend: { top: 'bottom', type: 'scroll' },
+      series: [{
+        type: 'pie',
+        radius: '60%',
+        center: ['50%', '45%'],
+        data: catData,
+        label: { show: false }
+      }]
+    });
+  }
+
+  // 4. Status Pie
+  if (statusPieRef.value) {
+    if (!statusPieChart) statusPieChart = echarts.init(statusPieRef.value);
+    const statusData = (stats.value.statusStats || []).map(it => ({
+      name: it.status,
+      value: it.count
+    }));
+    statusPieChart.setOption({
+      tooltip: { trigger: 'item', formatter: '{b}: {c}单 ({d}%)' },
+      legend: { top: 'bottom', type: 'scroll' },
+      series: [{
+        type: 'pie',
+        radius: ['40%', '70%'],
+        center: ['50%', '45%'],
+        avoidLabelOverlap: false,
+        itemStyle: { borderRadius: 4, borderColor: '#fff', borderWidth: 2 },
+        label: { show: false, position: 'center' },
+        emphasis: { label: { show: true, fontSize: 16, fontWeight: 'bold' } },
+        data: statusData
+      }]
+    });
+  }
 };
 
 onMounted(() => {
   fetchStats();
   // resize handling
-  const resize = () => pieChart && pieChart.resize();
+  const resize = () => {
+    pieChart && pieChart.resize();
+    monthlyChart && monthlyChart.resize();
+    categoryPieChart && categoryPieChart.resize();
+    statusPieChart && statusPieChart.resize();
+  };
   window.addEventListener('resize', resize);
   onBeforeUnmount(() => {
     window.removeEventListener('resize', resize);
     pieChart && pieChart.dispose();
+    monthlyChart && monthlyChart.dispose();
+    categoryPieChart && categoryPieChart.dispose();
+    statusPieChart && statusPieChart.dispose();
     pieChart = null;
+    monthlyChart = null;
+    categoryPieChart = null;
+    statusPieChart = null;
   });
-  watch(editMode, (val) => {
-    if (val) {
-      initInteract();
-    } else {
-      destroyInteract();
-      saveLayout();
-    }
-  }, { immediate: false });
 });
 
-watch(() => stats.value.unfinishedByCategory, () => {
-  renderPie();
-});
+watch(() => stats.value, () => {
+  renderCharts();
+}, { deep: true });
 </script>
 
 <style scoped>
@@ -357,41 +345,26 @@ watch(() => stats.value.unfinishedByCategory, () => {
 .recent-card {
   margin-top: 20px;
 }
+.widget .el-card {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.widget :deep(.el-card__body) {
+  flex: 1;
+  overflow: hidden;
+  padding: 10px;
+}
 .pie-container {
   width: 100%;
-  height: 320px;
+  height: 100%;
 }
 .widgets {
   position: relative;
   min-height: 900px;
-  /* grid background in editing mode */
 }
 .widget {
   position: absolute;
   box-sizing: border-box;
-}
-.widgets.editing .widget {
-  outline: 1px dashed #bbb;
-  cursor: move;
-}
-.widgets.editing {
-  background-image:
-    linear-gradient(to right, rgba(0,0,0,0.04) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(0,0,0,0.04) 1px, transparent 1px);
-  background-size: 20px 20px;
-}
-.widget.active {
-  outline: 2px solid #409EFF;
-}
-.badge {
-  position: absolute;
-  right: 6px;
-  top: 6px;
-  background: rgba(0,0,0,0.5);
-  color: #fff;
-  font-size: 12px;
-  padding: 2px 6px;
-  border-radius: 3px;
-  pointer-events: none;
 }
 </style>

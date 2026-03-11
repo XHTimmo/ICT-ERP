@@ -71,9 +71,9 @@
           </div>
         </template>
       </el-table-column>
-      <el-table-column prop="date" label="日期" width="120" sortable />
-      <el-table-column prop="name" label="报销名称" width="150" sortable />
-      <el-table-column prop="status" label="状态" width="140" sortable>
+      <el-table-column prop="date" label="日期" width="120" />
+      <el-table-column prop="name" label="报销名称" width="150" />
+      <el-table-column prop="status" label="状态" width="140">
         <template #default="scope">
           <el-select 
             v-model="scope.row.status" 
@@ -88,8 +88,8 @@
           </el-select>
         </template>
       </el-table-column>
-      <el-table-column prop="category" label="类别" width="100" sortable />
-      <el-table-column prop="amount" label="金额" width="120" sortable>
+      <el-table-column prop="category" label="类别" width="100" />
+      <el-table-column prop="amount" label="金额" width="120">
         <template #default="scope">
           ¥ {{ scope.row.amount.toFixed(2) }}
         </template>
@@ -418,13 +418,26 @@ const filters = ref({
   dateRange: null
 });
 
+const statusOrder = ref([]);
+const categoryOrder = ref([]);
+
+const loadSortOrders = async () => {
+  try {
+    statusOrder.value = await window.api.getStatusOrder();
+    const cats = await window.api.getCategories();
+    categoryOrder.value = cats.map(c => c.name);
+  } catch (e) {
+    console.error('Failed to load sort orders:', e);
+  }
+};
+
 const uniqueCategories = computed(() => {
   const categories = new Set(tableData.value.map(item => item.category).filter(Boolean));
   return Array.from(categories);
 });
 
 const filteredTableData = computed(() => {
-  return tableData.value.filter(item => {
+  const filtered = tableData.value.filter(item => {
     // Name filter
     if (filters.value.name && (!item.name || !item.name.includes(filters.value.name))) return false;
     
@@ -444,6 +457,38 @@ const filteredTableData = computed(() => {
     
     return true;
   });
+
+  return filtered.sort((a, b) => {
+    // 1. Status Priority
+    let statusIndexA = statusOrder.value.indexOf(a.status);
+    let statusIndexB = statusOrder.value.indexOf(b.status);
+    if (statusIndexA === -1) statusIndexA = 999;
+    if (statusIndexB === -1) statusIndexB = 999;
+    
+    if (statusIndexA !== statusIndexB) {
+      return statusIndexA - statusIndexB;
+    }
+    
+    // 2. Category Priority
+    let catIndexA = categoryOrder.value.indexOf(a.category);
+    let catIndexB = categoryOrder.value.indexOf(b.category);
+    if (catIndexA === -1) catIndexA = 999;
+    if (catIndexB === -1) catIndexB = 999;
+    
+    if (catIndexA !== catIndexB) {
+      return catIndexA - catIndexB;
+    }
+    
+    // 3. Time Priority (Date) - Descending (Newest first)
+    const dateA = dayjs(a.date);
+    const dateB = dayjs(b.date);
+    if (!dateA.isSame(dateB)) {
+        return dateB.valueOf() - dateA.valueOf();
+    }
+    
+    // Fallback to created_at
+    return (b.created_at || 0) - (a.created_at || 0);
+  });
 });
 
 const handleSelectionChange = (val) => {
@@ -457,6 +502,7 @@ const formatTime = (timestamp) => {
 const fetchData = async () => {
   loading.value = true;
   try {
+    await loadSortOrders();
     const data = await window.api.getReimbursements();
     tableData.value = data;
   } catch (error) {

@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld('api', {
   getReimbursements: () => ipcRenderer.invoke('get-reimbursements'),
   getDashboardStats: () => ipcRenderer.invoke('get-dashboard-stats'),
   getCategories: () => ipcRenderer.invoke('get-categories'),
+  getStatusOrder: () => ipcRenderer.invoke('get-status-order'),
+  setStatusOrder: (order) => ipcRenderer.invoke('set-status-order', order),
   addCategory: (name) => ipcRenderer.invoke('add-category', name),
   deleteCategory: (id) => ipcRenderer.invoke('delete-category', id),
   updateCategoryOrder: (categories) => ipcRenderer.invoke('update-category-order', categories),

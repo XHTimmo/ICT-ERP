@@ -69,6 +69,17 @@ function setupIPC(mainWindow) {
     }
   });
 
+  // Get Status Order
+  ipcMain.handle('get-status-order', () => {
+    return store.get('statusOrder') || ['材料不齐', '待提交', '待审核', '待打款', '已完成'];
+  });
+
+  // Set Status Order
+  ipcMain.handle('set-status-order', (event, order) => {
+    store.set('statusOrder', order);
+    return true;
+  });
+
   // Add Category
   ipcMain.handle('add-category', (event, name) => {
     try {

@@ -309,22 +309,9 @@ const resetForm = () => {
     electronic_invoice: [],
     payment_screenshot: []
   };
-  // Reset category options to default
-  categoryOptions.value = [...defaultCategories];
 };
 
-onMounted(async () => {
-  try {
-    const categories = await window.api.getCategories();
-    if (categories && categories.length > 0) {
-      // Merge with default, remove duplicates
-      const unique = new Set([...defaultCategories, ...categories]);
-      categoryOptions.value = Array.from(unique);
-    }
-  } catch (e) {
-    console.error('Failed to load categories', e);
-  }
-});
+
 </script>
 
 <style scoped>
