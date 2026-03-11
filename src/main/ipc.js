@@ -116,7 +116,25 @@ function setupIPC(mainWindow) {
       if (!storagePath) throw new Error('Storage path not set');
       // Ensure DB is initialized
       initDB(storagePath);
-      return getReimbursements();
+      const records = getReimbursements();
+      
+      // Resolve relative paths for proofs
+      return records.map(record => {
+        if (record.proofs) {
+          const resolvedProofs = {};
+          for (const [key, files] of Object.entries(record.proofs)) {
+            const fileList = Array.isArray(files) ? files : (files ? [files] : []);
+            resolvedProofs[key] = fileList.map(filePath => {
+              if (filePath && !path.isAbsolute(filePath)) {
+                return path.join(storagePath, filePath);
+              }
+              return filePath;
+            });
+          }
+          record.proofs = resolvedProofs;
+        }
+        return record;
+      });
     } catch (error) {
       console.error('Error getting reimbursements:', error);
       throw error;
@@ -153,13 +171,6 @@ function setupIPC(mainWindow) {
             };
             const materialType = materialTypeMap[key] || key;
             const safeName = (data.name || '未命名').replace(/[\\/:*?"<>|]/g, '_'); // Sanitize filename
-            // Add index if there are multiple files or just always add it to be safe/consistent
-            const indexSuffix = fileList.length > 1 ? `_${i + 1}` : ''; 
-            // If it's the first file and only one, maybe keep old format? 
-            // User asked for "multiple proofs", so consistent naming is better.
-            // Let's use index if > 1, or maybe always use index to avoid overwriting if user uploads same file twice?
-            // Let's use index 1, 2, 3... always for clarity if we change to multi-file.
-            // But to keep it clean for single file:
             const suffix = fileList.length > 1 ? `_${i + 1}` : '';
             
             const fileName = `${safeName}_${materialType}_${data.amount}${suffix}${ext}`;
@@ -174,7 +185,8 @@ function setupIPC(mainWindow) {
             }
 
             await fs.copy(filePath, finalDestPath);
-            proofs[key].push(finalDestPath);
+            // Store relative path to storage path
+            proofs[key].push(path.relative(storagePath, finalDestPath));
           }
         }
       }
@@ -248,7 +260,23 @@ function setupIPC(mainWindow) {
       const record = getReimbursement(id);
       if (!record) throw new Error('Reimbursement not found');
 
+      // 1. Identify files to remove
+      const oldFiles = new Set();
+      if (record.proofs) {
+        for (const files of Object.values(record.proofs)) {
+          const fileList = Array.isArray(files) ? files : (files ? [files] : []);
+          for (const f of fileList) {
+            if (f) {
+              // Resolve relative paths to absolute for reliable comparison
+              const absPath = path.isAbsolute(f) ? f : path.join(storagePath, f);
+              oldFiles.add(path.resolve(absPath));
+            }
+          }
+        }
+      }
+
       const updatedProofs = {};
+      const newFiles = new Set();
 
       for (const [key, files] of Object.entries(proofs)) {
         updatedProofs[key] = [];
@@ -259,8 +287,26 @@ function setupIPC(mainWindow) {
           if (!filePath) continue;
 
           // Check if file is already in storage
-          if (filePath.startsWith(attachmentsPath)) {
-            updatedProofs[key].push(filePath);
+          // Normalize paths for comparison
+          const normalizedFilePath = path.normalize(filePath);
+          const normalizedAttachmentsPath = path.normalize(attachmentsPath);
+          
+          let isInternal = false;
+          try {
+            if (process.platform === 'win32') {
+              isInternal = normalizedFilePath.toLowerCase().startsWith(normalizedAttachmentsPath.toLowerCase());
+            } else {
+              isInternal = normalizedFilePath.startsWith(normalizedAttachmentsPath);
+            }
+          } catch (e) {
+            console.warn('Path comparison failed:', e);
+          }
+
+          if (isInternal) {
+            const relPath = path.relative(storagePath, filePath);
+            updatedProofs[key].push(relPath);
+            // Add absolute path to newFiles set
+            newFiles.add(path.resolve(filePath));
           } else {
             // New file, needs to be copied and renamed
             const ext = path.extname(filePath);
@@ -276,20 +322,108 @@ function setupIPC(mainWindow) {
             const fileName = `${safeName}_${materialType}_${record.amount}${suffix}${ext}`;
             let destPath = path.join(attachmentsPath, fileName);
             
-            // Avoid overwriting existing files with same name (e.g. if re-uploading or name collision)
+            // Avoid overwriting existing files with same name
             if (await fs.pathExists(destPath)) {
-               const timestamp = Date.now();
-               const fileNameWithTime = `${safeName}_${materialType}_${record.amount}${suffix}_${timestamp}${ext}`;
-               destPath = path.join(attachmentsPath, fileNameWithTime);
+               // Only rename if it's NOT the same file we are copying
+               // Check if source and dest are the same file
+               const srcStat = await fs.stat(filePath).catch(() => null);
+               const destStat = await fs.stat(destPath).catch(() => null);
+               
+               const isSameFile = srcStat && destStat && srcStat.ino === destStat.ino && srcStat.dev === destStat.dev;
+               
+               if (!isSameFile) {
+                 const timestamp = Date.now();
+                 const fileNameWithTime = `${safeName}_${materialType}_${record.amount}${suffix}_${timestamp}${ext}`;
+                 destPath = path.join(attachmentsPath, fileNameWithTime);
+               } else {
+                 // If it is the same file, we can just use the destPath and skip copy
+                 const relPath = path.relative(storagePath, destPath);
+                 updatedProofs[key].push(relPath);
+                 newFiles.add(path.resolve(destPath));
+                 continue;
+               }
             }
 
-            await fs.copy(filePath, destPath);
-            updatedProofs[key].push(destPath);
+            try {
+              // Only copy if paths are different (path string comparison)
+              if (path.resolve(filePath) !== path.resolve(destPath)) {
+                await fs.copy(filePath, destPath);
+              }
+              const relPath = path.relative(storagePath, destPath);
+              updatedProofs[key].push(relPath);
+              newFiles.add(path.resolve(destPath));
+            } catch (copyError) {
+              console.error(`Failed to copy file ${filePath} to ${destPath}:`, copyError);
+              // If copy fails, maybe try to use original path? Or skip?
+              // Let's throw to alert user
+              throw new Error(`无法复制文件: ${path.basename(filePath)}`);
+            }
           }
         }
       }
 
       updateReimbursementProofs(id, updatedProofs, action, details);
+
+      // 2. Delete orphaned files
+      // Find files that were in oldFiles but are NOT in newFiles
+      const filesToDelete = [...oldFiles].filter(f => !newFiles.has(f));
+      
+      if (filesToDelete.length > 0) {
+        console.log('Found potential orphaned files to delete:', filesToDelete);
+        
+        // Check if any other reimbursement uses these files
+        const allReimbursements = getReimbursements();
+        const otherFiles = new Set();
+        
+        for (const r of allReimbursements) {
+          if (r.id === id) continue; // Skip current record (it has the OLD proofs in DB before update? No, we just updated it!)
+          // Wait, updateReimbursementProofs updates the DB immediately?
+          // Yes, updateReimbursementProofs(id, updatedProofs, ...) runs the SQL update.
+          // So if we call getReimbursements() NOW, it will return the updated record for 'id'.
+          // So we should just skip checking 'id' or rely on the fact that 'id' now has 'updatedProofs' which matches 'newFiles'.
+          
+          if (r.proofs) {
+            // r.proofs is already parsed object (from getReimbursements wrapper? No, getReimbursements() returns parsed objects)
+            // But wait, getReimbursements() inside ipc.js calls the raw DB one?
+            // No, line 119 calls getReimbursements() from database.js which returns parsed objects.
+            // AND ipc.js handle wrapper ADDS path resolution.
+            // But here we are calling database.js getReimbursements directly?
+            // No, we are in ipc.js, so we can call the function imported from database.js.
+            // database.js getReimbursements returns parsed proofs, but paths are RELATIVE (as stored in DB).
+            
+            for (const files of Object.values(r.proofs)) {
+              const fileList = Array.isArray(files) ? files : (files ? [files] : []);
+              for (const f of fileList) {
+                if (f) {
+                   const absPath = path.isAbsolute(f) ? f : path.join(storagePath, f);
+                   otherFiles.add(path.resolve(absPath));
+                }
+              }
+            }
+          }
+        }
+        
+        // Actually delete files that are not used by others
+        for (const f of filesToDelete) {
+           // Ensure we only delete files inside attachments folder (safety)
+           if (!path.resolve(f).startsWith(path.resolve(attachmentsPath))) {
+             console.warn('Skipping deletion of external file:', f);
+             continue;
+           }
+
+           if (!otherFiles.has(f)) {
+             try {
+               console.log('Deleting orphaned file:', f);
+               await fs.remove(f);
+             } catch (e) {
+               console.error('Failed to delete orphaned file:', f, e);
+             }
+           } else {
+             console.log('File is used by another record, skipping delete:', f);
+           }
+        }
+      }
+
       return { success: true };
     } catch (error) {
       console.error('Error updating proofs:', error);
@@ -388,10 +522,20 @@ function setupIPC(mainWindow) {
             
             const fileName = getBasename(fPath);
             
-            // Try original path, then try current attachments directory
+            // Handle relative paths (new format) and absolute paths (legacy)
             let actualPath = fPath;
+            
+            if (!path.isAbsolute(fPath)) {
+               actualPath = path.join(storagePath, fPath);
+            }
+
+            // If not found, try fallback to attachments directory with basename 
+            // (handles cases where path might be just filename or broken relative path)
             if (!(await fs.pathExists(actualPath))) {
-              actualPath = path.join(attachmentsPath, fileName);
+              const fallbackPath = path.join(attachmentsPath, fileName);
+              if (await fs.pathExists(fallbackPath)) {
+                actualPath = fallbackPath;
+              }
             }
 
             if (await fs.pathExists(actualPath)) {

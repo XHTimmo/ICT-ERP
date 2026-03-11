@@ -146,6 +146,12 @@
             <el-button
               size="small"
               type="primary"
+              :icon="DocumentCopy"
+              @click="handleCopy(scope.row)"
+            >复制</el-button>
+            <el-button
+              size="small"
+              type="primary"
               icon="Upload"
               @click="handleUpload(scope.row)"
             >补交</el-button>
@@ -244,6 +250,61 @@
       </template>
     </el-dialog>
 
+    <el-dialog v-model="copyDialogVisible" title="复制报销单" width="500px">
+      <el-alert
+        title="复制将创建一个新的报销单，不包含原有的凭证文件，请稍后补交。"
+        type="info"
+        show-icon
+        style="margin-bottom: 20px"
+      />
+      <el-form :model="copyForm" label-width="100px">
+        <el-form-item label="报销名称" required>
+          <el-input v-model="copyForm.name" />
+        </el-form-item>
+        <el-form-item label="日期" required>
+          <el-date-picker
+            v-model="copyForm.date"
+            type="date"
+            placeholder="选择日期"
+            value-format="YYYY-MM-DD"
+            style="width: 100%"
+          />
+        </el-form-item>
+        <el-form-item label="金额" required>
+          <el-input-number
+            v-model="copyForm.amount"
+            :precision="2"
+            :step="0.1"
+            :min="0"
+            style="width: 100%"
+          />
+        </el-form-item>
+        <el-form-item label="类别" required>
+          <el-select v-model="copyForm.category" style="width: 100%">
+            <el-option
+              v-for="cat in uniqueCategories"
+              :key="cat"
+              :label="cat"
+              :value="cat"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input
+            v-model="copyForm.description"
+            type="textarea"
+            :rows="3"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="copyDialogVisible = false">取消</el-button>
+          <el-button type="primary" @click="submitCopy">确定复制</el-button>
+        </span>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="editDialogVisible" title="修改报销信息" width="500px">
       <el-form :model="editForm" label-width="100px">
         <el-form-item label="报销名称" required>
@@ -298,7 +359,7 @@
 <script setup>
 import { ref, reactive, onMounted, computed } from 'vue';
 import { ElMessage, ElMessageBox, ElLoading } from 'element-plus';
-import { Delete, Upload } from '@element-plus/icons-vue';
+import { Delete, Upload, Close, DocumentCopy } from '@element-plus/icons-vue';
 import dayjs from 'dayjs';
 import isBetween from 'dayjs/plugin/isBetween';
 
@@ -309,6 +370,7 @@ const loading = ref(false);
 const selectedRows = ref([]);
 const uploadDialogVisible = ref(false);
 const editDialogVisible = ref(false);
+const copyDialogVisible = ref(false);
 const uploadForm = ref({
   id: null,
   proofs: {
@@ -324,6 +386,19 @@ const editForm = ref({
   amount: 0,
   category: '',
   description: ''
+});
+const copyForm = ref({
+  name: '',
+  date: '',
+  amount: 0,
+  category: '',
+  description: '',
+  proofs: {
+    physical_photo: [],
+    electronic_invoice: [],
+    payment_screenshot: []
+  },
+  status: '材料不齐'
 });
 
 const viewDialogVisible = ref(false);
@@ -409,6 +484,43 @@ const handleEdit = (row) => {
     description: row.description
   };
   editDialogVisible.value = true;
+};
+
+const handleCopy = (row) => {
+  copyForm.value = {
+    name: row.name + ' (副本)',
+    date: dayjs().format('YYYY-MM-DD'),
+    amount: row.amount,
+    category: row.category,
+    description: row.description,
+    proofs: {
+      physical_photo: [],
+      electronic_invoice: [],
+      payment_screenshot: []
+    },
+    status: '材料不齐'
+  };
+  copyDialogVisible.value = true;
+};
+
+const submitCopy = async () => {
+  try {
+    const data = {
+      ...copyForm.value,
+      status: '材料不齐'
+    };
+    
+    const result = await window.api.addReimbursement(JSON.parse(JSON.stringify(data)));
+    if (result.success) {
+      ElMessage.success('报销单复制成功，请记得补交凭证');
+      copyDialogVisible.value = false;
+      fetchData();
+    } else {
+      ElMessage.error('复制失败: ' + (result.error || '未知错误'));
+    }
+  } catch (error) {
+    ElMessage.error('复制失败: ' + error.message);
+  }
 };
 
 const submitEdit = async () => {
@@ -560,16 +672,20 @@ const submitUpload = async () => {
     const action = '补交材料';
     const details = '更新了报销凭证';
     
-    await window.api.updateReimbursementProofs({
+    const result = await window.api.updateReimbursementProofs({
       id,
       proofs,
       action,
       details
     });
     
-    ElMessage.success('材料补交成功');
-    uploadDialogVisible.value = false;
-    fetchData();
+    if (result.success) {
+      ElMessage.success('材料补交成功');
+      uploadDialogVisible.value = false;
+      fetchData();
+    } else {
+      ElMessage.error('补交失败: ' + (result.error || '未知错误'));
+    }
   } catch (error) {
     ElMessage.error('补交失败: ' + error.message);
   }
@@ -680,6 +796,17 @@ defineExpose({ fetchData });
   padding: 20px;
 }
 
+.proof-buttons {
+  display: flex;
+  gap: 10px;
+  padding-top: 10px; /* Ensure badge is not clipped */
+  align-items: center;
+}
+
+.proof-buttons :deep(.el-badge__content) {
+  z-index: 10;
+}
+
 .upload-area {
   width: 100%;
   border: 1px dashed #d9d9d9;
@@ -708,6 +835,50 @@ defineExpose({ fetchData });
 .upload-text {
   color: #606266;
   font-size: 12px;
+}
+
+.file-list {
+  margin-top: 10px;
+  text-align: left;
+}
+
+.file-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  background-color: #f5f7fa;
+  border-radius: 4px;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+
+.file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+}
+
+.remove-icon {
+  cursor: pointer;
+  color: #f56c6c; /* 红色，更醒目 */
+  font-size: 16px; /* 稍微大一点 */
+  margin-left: 8px;
+  background-color: #fff; /* 添加白色背景 */
+  border-radius: 50%; /* 圆形 */
+  padding: 2px; /* 内边距 */
+  box-shadow: 0 1px 2px rgba(0,0,0,0.1); /* 轻微阴影 */
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  height: 20px;
+  width: 20px;
+}
+
+.remove-icon:hover {
+  color: #fff;
+  background-color: #f56c6c;
 }
 
 .file-preview {
