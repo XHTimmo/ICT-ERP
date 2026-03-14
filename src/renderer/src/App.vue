@@ -6,6 +6,7 @@
         <el-menu mode="horizontal" :default-active="activeTab" @select="handleSelect">
           <el-menu-item index="dashboard">看板</el-menu-item>
           <el-menu-item index="list">报销列表</el-menu-item>
+          <el-menu-item index="travel">差旅管理</el-menu-item>
           <el-menu-item index="create">新增报销</el-menu-item>
           <el-menu-item index="settings">系统设置</el-menu-item>
         </el-menu>
@@ -14,6 +15,7 @@
     <el-main>
       <Dashboard v-if="activeTab === 'dashboard'" />
       <ReimbursementList v-if="activeTab === 'list'" @refresh="fetchData" />
+      <TravelManagement v-if="activeTab === 'travel'" />
       <ReimbursementForm v-if="activeTab === 'create'" @success="activeTab = 'list'" />
       <Settings v-if="activeTab === 'settings'" />
     </el-main>
@@ -25,6 +27,7 @@ import { ref, onMounted, onUnmounted } from 'vue';
 import { ElNotification, ElMessageBox, ElMessage } from 'element-plus';
 import Dashboard from './components/Dashboard.vue';
 import ReimbursementList from './components/ReimbursementList.vue';
+import TravelManagement from './components/TravelManagement.vue';
 import ReimbursementForm from './components/ReimbursementForm.vue';
 import Settings from './components/Settings.vue';
 

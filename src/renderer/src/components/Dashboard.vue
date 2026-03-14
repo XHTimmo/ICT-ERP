@@ -41,6 +41,18 @@
         </el-card>
       </div>
 
+      <div :style="widgetStyle('travelTotal')" :class="widgetClass" ref="el_travelTotal">
+        <el-card shadow="hover">
+          <template #header>
+            <div class="card-header">
+              <span>差旅报销总额</span>
+            </div>
+          </template>
+          <div class="card-value primary">¥ {{ (stats.travelStats?.totalAmount || 0).toFixed(2) }}</div>
+          <div class="card-sub-value">共 {{ stats.travelStats?.totalCount || 0 }} 单</div>
+        </el-card>
+      </div>
+
       <div :style="widgetStyle('monthlyChart')" :class="widgetClass" ref="el_monthlyChart">
         <el-card class="box-card" header="月度报销趋势">
           <div ref="monthlyChartRef" class="pie-container"></div>
@@ -128,7 +140,8 @@ const stats = ref({
   recentItems: [],
   unfinishedTotalAmount: 0,
   unfinishedByCategory: [],
-  monthlyStats: []
+  monthlyStats: [],
+  travelStats: { totalAmount: 0, totalCount: 0 }
 });
 
 const pieRef = ref(null);
@@ -143,9 +156,10 @@ let statusPieChart = null;
 
 const widgetClass = 'widget';
 const defaultLayout = {
-  totalAmount: { x: 0, y: 0, w: 380, h: 120 },
-  totalCount: { x: 400, y: 0, w: 380, h: 120 },
-  unfinishedTotal: { x: 800, y: 0, w: 380, h: 120 },
+  totalAmount: { x: 0, y: 0, w: 280, h: 120 },
+  totalCount: { x: 300, y: 0, w: 280, h: 120 },
+  unfinishedTotal: { x: 600, y: 0, w: 280, h: 120 },
+  travelTotal: { x: 900, y: 0, w: 280, h: 120 },
   
   monthlyChart: { x: 0, y: 140, w: 1180, h: 300 },
   
@@ -338,6 +352,14 @@ watch(() => stats.value, () => {
 }
 .card-value.danger {
   color: #F56C6C;
+}
+.card-value.primary {
+  color: #409EFF;
+}
+.card-sub-value {
+  font-size: 14px;
+  color: #909399;
+  text-align: center;
 }
 .stats-row {
   margin-bottom: 20px;

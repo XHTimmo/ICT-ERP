@@ -3,7 +3,7 @@ const path = require('path');
 const fs = require('fs-extra');
 const { v4: uuidv4 } = require('uuid');
 const Store = require('electron-store');
-const { initDB, addReimbursement, getReimbursements, getReimbursement, updateReimbursementStatus, deleteReimbursement, updateReimbursementProofs, updateReimbursementAmount, updateReimbursement, getDashboardStats, getCategories, addCategory, deleteCategory, updateCategoryOrder } = require('./database');
+const { initDB, addReimbursement, getReimbursements, getReimbursement, updateReimbursementStatus, deleteReimbursement, updateReimbursementProofs, updateReimbursementAmount, updateReimbursement, getDashboardStats, getCategories, addCategory, deleteCategory, updateCategoryOrder, getTravels, addTravel, updateTravel, deleteTravel } = require('./database');
 const archiver = require('archiver');
 const { createWriteStream } = require('fs');
 
@@ -298,289 +298,188 @@ function setupIPC(mainWindow) {
           if (!filePath) continue;
 
           // Check if file is already in storage
-          // Normalize paths for comparison
-          const normalizedFilePath = path.normalize(filePath);
-          const normalizedAttachmentsPath = path.normalize(attachmentsPath);
+          // If it's an absolute path inside storage, or relative path
+          // We assume input filePath is usually absolute path from file selection
           
-          let isInternal = false;
-          try {
-            if (process.platform === 'win32') {
-              isInternal = normalizedFilePath.toLowerCase().startsWith(normalizedAttachmentsPath.toLowerCase());
-            } else {
-              isInternal = normalizedFilePath.startsWith(normalizedAttachmentsPath);
-            }
-          } catch (e) {
-            console.warn('Path comparison failed:', e);
+          let isExisting = false;
+          const absFilePath = path.resolve(filePath);
+          if (oldFiles.has(absFilePath)) {
+             // File already exists in storage, just keep it
+             // Store relative
+             updatedProofs[key].push(path.relative(storagePath, absFilePath));
+             newFiles.add(absFilePath);
+             continue;
           }
 
-          if (isInternal) {
-            const relPath = path.relative(storagePath, filePath);
-            updatedProofs[key].push(relPath);
-            // Add absolute path to newFiles set
-            newFiles.add(path.resolve(filePath));
-          } else {
-            // New file, needs to be copied and renamed
-            const ext = path.extname(filePath);
-            const materialTypeMap = {
+          // New file, copy it
+          const ext = path.extname(filePath);
+          const materialTypeMap = {
               'physical_photo': '实物照片',
               'electronic_invoice': '电子发票',
               'payment_screenshot': '支付截图'
             };
-            const materialType = materialTypeMap[key] || key;
-            const safeName = (record.name || '未命名').replace(/[\\/:*?"<>|]/g, '_');
-            const suffix = fileList.length > 1 ? `_${i + 1}` : '';
-            
-            const fileName = `${safeName}_${materialType}_${record.amount}${suffix}${ext}`;
-            let destPath = path.join(attachmentsPath, fileName);
-            
-            // Avoid overwriting existing files with same name
-            if (await fs.pathExists(destPath)) {
-               // Only rename if it's NOT the same file we are copying
-               // Check if source and dest are the same file
-               const srcStat = await fs.stat(filePath).catch(() => null);
-               const destStat = await fs.stat(destPath).catch(() => null);
-               
-               const isSameFile = srcStat && destStat && srcStat.ino === destStat.ino && srcStat.dev === destStat.dev;
-               
-               if (!isSameFile) {
-                 const timestamp = Date.now();
-                 const fileNameWithTime = `${safeName}_${materialType}_${record.amount}${suffix}_${timestamp}${ext}`;
-                 destPath = path.join(attachmentsPath, fileNameWithTime);
-               } else {
-                 // If it is the same file, we can just use the destPath and skip copy
-                 const relPath = path.relative(storagePath, destPath);
-                 updatedProofs[key].push(relPath);
-                 newFiles.add(path.resolve(destPath));
-                 continue;
-               }
-            }
-
-            try {
-              // Only copy if paths are different (path string comparison)
-              if (path.resolve(filePath) !== path.resolve(destPath)) {
-                await fs.copy(filePath, destPath);
-              }
-              const relPath = path.relative(storagePath, destPath);
-              updatedProofs[key].push(relPath);
-              newFiles.add(path.resolve(destPath));
-            } catch (copyError) {
-              console.error(`Failed to copy file ${filePath} to ${destPath}:`, copyError);
-              // If copy fails, maybe try to use original path? Or skip?
-              // Let's throw to alert user
-              throw new Error(`无法复制文件: ${path.basename(filePath)}`);
-            }
-          }
-        }
-      }
-
-      updateReimbursementProofs(id, updatedProofs, action, details);
-
-      // 2. Delete orphaned files
-      // Find files that were in oldFiles but are NOT in newFiles
-      const filesToDelete = [...oldFiles].filter(f => !newFiles.has(f));
-      
-      if (filesToDelete.length > 0) {
-        console.log('Found potential orphaned files to delete:', filesToDelete);
-        
-        // Check if any other reimbursement uses these files
-        const allReimbursements = getReimbursements();
-        const otherFiles = new Set();
-        
-        for (const r of allReimbursements) {
-          if (r.id === id) continue; // Skip current record (it has the OLD proofs in DB before update? No, we just updated it!)
-          // Wait, updateReimbursementProofs updates the DB immediately?
-          // Yes, updateReimbursementProofs(id, updatedProofs, ...) runs the SQL update.
-          // So if we call getReimbursements() NOW, it will return the updated record for 'id'.
-          // So we should just skip checking 'id' or rely on the fact that 'id' now has 'updatedProofs' which matches 'newFiles'.
+          const materialType = materialTypeMap[key] || key;
+          const safeName = (record.name || '未命名').replace(/[\\/:*?"<>|]/g, '_');
+          const suffix = fileList.length > 1 ? `_${i + 1}` : '';
           
-          if (r.proofs) {
-            // r.proofs is already parsed object (from getReimbursements wrapper? No, getReimbursements() returns parsed objects)
-            // But wait, getReimbursements() inside ipc.js calls the raw DB one?
-            // No, line 119 calls getReimbursements() from database.js which returns parsed objects.
-            // AND ipc.js handle wrapper ADDS path resolution.
-            // But here we are calling database.js getReimbursements directly?
-            // No, we are in ipc.js, so we can call the function imported from database.js.
-            // database.js getReimbursements returns parsed proofs, but paths are RELATIVE (as stored in DB).
-            
-            for (const files of Object.values(r.proofs)) {
-              const fileList = Array.isArray(files) ? files : (files ? [files] : []);
-              for (const f of fileList) {
-                if (f) {
-                   const absPath = path.isAbsolute(f) ? f : path.join(storagePath, f);
-                   otherFiles.add(path.resolve(absPath));
-                }
-              }
+          const fileName = `${safeName}_${materialType}_${record.amount}${suffix}${ext}`;
+          let destPath = path.join(attachmentsPath, fileName);
+          
+           if (await fs.pathExists(destPath)) {
+               const timestamp = Date.now();
+               const fileNameWithTime = `${safeName}_${materialType}_${record.amount}${suffix}_${timestamp}${ext}`;
+               destPath = path.join(attachmentsPath, fileNameWithTime);
             }
-          }
-        }
-        
-        // Actually delete files that are not used by others
-        for (const f of filesToDelete) {
-           // Ensure we only delete files inside attachments folder (safety)
-           if (!path.resolve(f).startsWith(path.resolve(attachmentsPath))) {
-             console.warn('Skipping deletion of external file:', f);
-             continue;
-           }
 
-           if (!otherFiles.has(f)) {
-             try {
-               console.log('Deleting orphaned file:', f);
-               await fs.remove(f);
-             } catch (e) {
-               console.error('Failed to delete orphaned file:', f, e);
-             }
-           } else {
-             console.log('File is used by another record, skipping delete:', f);
-           }
+          await fs.copy(filePath, destPath);
+          updatedProofs[key].push(path.relative(storagePath, destPath));
+          newFiles.add(path.resolve(destPath));
         }
       }
-
+      
+      // Delete removed files (optional, maybe we want to keep them?)
+      // For now, let's NOT delete files to be safe, or implement later
+      
+      updateReimbursementProofs(id, updatedProofs, action, details);
       return { success: true };
+
     } catch (error) {
       console.error('Error updating proofs:', error);
       return { success: false, error: error.message };
     }
   });
 
-  // Delete Reimbursement
-  ipcMain.handle('delete-reimbursement', async (event, id) => {
+  // Export Travel Proofs
+  ipcMain.handle('export-travel-proofs', async (event, { applicant, date, itineraries }) => {
     try {
-      const storagePath = store.get('storagePath');
-      if (!storagePath) throw new Error('Storage path not set');
-      
-      // Get reimbursement to find files to delete (optional, skipping actual file deletion for safety or keeping history)
-      // For now, we just delete the record from DB
-      deleteReimbursement(id);
-      return { success: true };
-    } catch (error) {
-      console.error('Error deleting reimbursement:', error);
-      return { success: false, error: error.message };
-    }
-  });
-  
-  // Export ZIP
-  ipcMain.handle('export-zip', async (event, reimbursementIds) => {
-    console.log('--- EXPORT ZIP STARTED ---');
-    try {
-      let storagePath = store.get('storagePath');
-      if (!storagePath) {
-        storagePath = app.getPath('downloads');
-      }
-      
-      const attachmentsPath = path.join(storagePath, 'attachments');
-      await fs.ensureDir(storagePath);
-      
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const filename = `reimbursements_export_${timestamp}.zip`;
-      const filePath = path.join(storagePath, filename);
-      
-      const output = createWriteStream(filePath);
-      const archive = archiver('zip', { zlib: { level: 9 } });
+      const { filePath } = await dialog.showSaveDialog(mainWindow, {
+        title: '导出报销凭证',
+        defaultPath: `${applicant || '差旅'}_${date || '日期'}_报销凭证.zip`,
+        filters: [{ name: 'ZIP Files', extensions: ['zip'] }]
+      });
 
-      const promise = new Promise((resolve, reject) => {
-        output.on('close', resolve);
-        output.on('error', reject);
-        archive.on('error', reject);
+      if (!filePath) return { success: false, message: '已取消' };
+
+      const output = createWriteStream(filePath);
+      const archive = archiver('zip', {
+        zlib: { level: 9 }
+      });
+
+      archive.on('error', function(err) {
+        throw err;
       });
 
       archive.pipe(output);
 
-      const allReimbursements = getReimbursements();
-      const reimbursements = allReimbursements.filter(r => reimbursementIds.includes(r.id));
-      
-      // Helper for cross-platform basename
-      const getBasename = (p) => {
-        if (!p) return '';
-        // Handle both Windows and POSIX separators
-        return p.split(/[/\\]/).pop();
-      };
-
-      // Generate CSV Manifest
-      const csvHeader = 'ID,序号,日期,报销名称,金额,类别,状态,备注,实物照片,电子发票,支付截图\n';
-      const csvRows = reimbursements.map(r => {
-        let proofs = r.proofs || {};
-        if (typeof proofs === 'string') {
-          try { proofs = JSON.parse(proofs); } catch(e) { proofs = {}; }
-        }
+      for (let i = 0; i < itineraries.length; i++) {
+        const leg = itineraries[i];
+        // Ensure valid folder name
+        const from = leg.from || '未知';
+        const to = leg.to || '未知';
         
-        const getBaseNames = (p) => {
-          if (!p) return '';
-          const fileList = Array.isArray(p) ? p : [p];
-          return fileList.map(f => getBasename(f)).join('; ');
-        };
-
-        return `"${r.id}","${r.serial_no || ''}","${r.date}","${(r.name || '').replace(/"/g, '""')}","${r.amount}","${r.category}","${r.status}","${(r.description || '').replace(/"/g, '""')}","${getBaseNames(proofs.physical_photo)}","${getBaseNames(proofs.electronic_invoice)}","${getBaseNames(proofs.payment_screenshot)}"`;
-      }).join('\n');
-      
-      archive.append(csvHeader + csvRows, { name: 'manifest.csv' });
-
-      // Add files with path fixing
-      for (const r of reimbursements) {
-        let proofs = r.proofs || {};
-        if (typeof proofs === 'string') {
-          try { proofs = JSON.parse(proofs); } catch(e) { proofs = {}; }
+        let legDate = `行程${i+1}`;
+        if (Array.isArray(leg.date) && leg.date.length > 0) {
+            legDate = leg.date.join('至');
+        } else if (typeof leg.date === 'string') {
+            legDate = leg.date;
         }
 
-        const safeName = (r.name || '未命名').replace(/[\\/:*?"<>|]/g, '_');
-        const folderName = `${r.date}_${safeName}_${r.amount}`;
+        const folderName = `${legDate}_${from}-${to}`;
         
-        const addProofFiles = async (files, typeLabel) => {
-          if (!files) return;
-          const fileList = Array.isArray(files) ? files : [files];
-          
-          for (const fPath of fileList) {
-            if (!fPath) continue;
-            
-            const fileName = getBasename(fPath);
-            
-            // Handle relative paths (new format) and absolute paths (legacy)
-            let actualPath = fPath;
-            
-            if (!path.isAbsolute(fPath)) {
-               actualPath = path.join(storagePath, fPath);
-            }
-
-            // If not found, try fallback to attachments directory with basename 
-            // (handles cases where path might be just filename or broken relative path)
-            if (!(await fs.pathExists(actualPath))) {
-              const fallbackPath = path.join(attachmentsPath, fileName);
-              if (await fs.pathExists(fallbackPath)) {
-                actualPath = fallbackPath;
-              }
-            }
-
-            if (await fs.pathExists(actualPath)) {
-              archive.file(actualPath, { name: `${folderName}/${typeLabel}_${fileName}` });
-            } else {
-              console.warn(`File not found, skipping: ${fPath} (tried: ${actualPath})`);
-            }
-          }
+        const types = {
+            ticket: '车票',
+            hotelInvoice: '酒店发票',
+            hotelStatement: '酒店水单',
+            travelRequest: '出差申请'
         };
 
-        await addProofFiles(proofs.physical_photo, 'physical');
-        await addProofFiles(proofs.electronic_invoice, 'invoice');
-        await addProofFiles(proofs.payment_screenshot, 'payment');
+        for (const [key, label] of Object.entries(types)) {
+            if (leg[key] && leg[key].path) {
+                try {
+                    if (await fs.pathExists(leg[key].path)) {
+                        archive.file(leg[key].path, { name: `${folderName}/${label}${path.extname(leg[key].path)}` });
+                    }
+                } catch (e) {
+                    console.error(`File access error: ${leg[key].path}`, e);
+                }
+            }
+        }
       }
-      
+
       await archive.finalize();
-      await promise;
-      
       return { success: true, filePath };
+
     } catch (error) {
-      console.error('--- EXPORT FAILED ---', error);
+      console.error('Error exporting proofs:', error);
       return { success: false, error: error.message };
     }
   });
 
-  // Open File
-  ipcMain.handle('open-file', async (event, filePath) => {
-      const { shell } = require('electron');
-      if (await fs.pathExists(filePath)) {
-          await shell.openPath(filePath);
-          return true;
-      }
-      return false;
+  // Travel Management
+  ipcMain.handle('get-travels', () => {
+    try {
+      const storagePath = store.get('storagePath');
+      if (!storagePath) throw new Error('Storage path not set');
+      initDB(storagePath);
+      return getTravels();
+    } catch (error) {
+      console.error('Error getting travels:', error);
+      throw error;
+    }
   });
+
+  ipcMain.handle('add-travel', (event, data) => {
+    try {
+      const storagePath = store.get('storagePath');
+      if (!storagePath) throw new Error('Storage path not set');
+      initDB(storagePath);
+      
+      // Ensure date is string (handle daterange array)
+      const travelData = { ...data };
+      if (Array.isArray(travelData.date)) {
+        travelData.date = travelData.date.join(' 至 ');
+      }
+      
+      // Handle optional fields
+      if (travelData.applicant === undefined) travelData.applicant = null;
+      
+      return addTravel({ ...travelData, id: uuidv4() });
+    } catch (error) {
+      console.error('Error adding travel:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle('update-travel', (event, { id, ...data }) => {
+    try {
+      const storagePath = store.get('storagePath');
+      if (!storagePath) throw new Error('Storage path not set');
+      initDB(storagePath);
+      
+      const travelData = { ...data };
+      if (Array.isArray(travelData.date)) {
+        travelData.date = travelData.date.join(' 至 ');
+      }
+      
+      return updateTravel(id, travelData);
+    } catch (error) {
+      console.error('Error updating travel:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle('delete-travel', (event, id) => {
+    try {
+      const storagePath = store.get('storagePath');
+      if (!storagePath) throw new Error('Storage path not set');
+      initDB(storagePath);
+      return deleteTravel(id);
+    } catch (error) {
+      console.error('Error deleting travel:', error);
+      throw error;
+    }
+  });
+
 }
 
 module.exports = { setupIPC };

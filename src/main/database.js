@@ -33,6 +33,17 @@ function initDB(storagePath) {
         status TEXT,
         created_at INTEGER
       );
+
+      CREATE TABLE IF NOT EXISTS travels (
+        id TEXT PRIMARY KEY,
+        applicant TEXT,
+        date TEXT,
+        reason TEXT,
+        status TEXT,
+        total_amount REAL DEFAULT 0,
+        itineraries TEXT,
+        created_at INTEGER
+      );
       
       CREATE TABLE IF NOT EXISTS reimbursement_logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -84,6 +95,18 @@ function initDB(storagePath) {
     } catch (e) {
       // Column already exists, ignore
     }
+
+    // Migration: Add total_amount to travels if not exists
+    try {
+      const tableInfo = db.prepare("PRAGMA table_info(travels)").all();
+      const hasTotalAmount = tableInfo.some(col => col.name === 'total_amount');
+      if (!hasTotalAmount) {
+        db.exec("ALTER TABLE travels ADD COLUMN total_amount REAL DEFAULT 0");
+      }
+    } catch (e) {
+      console.error('Migration error:', e);
+    }
+    
     // Ensure unique index on serial_no to avoid duplicates
     try {
       db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_reimbursements_serial_no ON reimbursements(serial_no)");
@@ -306,8 +329,8 @@ function updateCategoryOrder(categories) {
 function getDashboardStats() {
   const db = getDB();
   
-  // Total Amount and Count
-  const totalStats = db.prepare('SELECT COUNT(*) as count, SUM(amount) as totalAmount FROM reimbursements').get();
+  // --- Reimbursements Stats ---
+  const reimTotal = db.prepare('SELECT COUNT(*) as count, SUM(amount) as totalAmount FROM reimbursements').get();
   
   // By Category
   const categoryStats = db.prepare('SELECT category, COUNT(*) as count, SUM(amount) as totalAmount FROM reimbursements GROUP BY category ORDER BY totalAmount DESC').all();
@@ -315,10 +338,10 @@ function getDashboardStats() {
   // By Status
   const statusStats = db.prepare('SELECT status, COUNT(*) as count, SUM(amount) as totalAmount FROM reimbursements GROUP BY status').all();
   
-  // Unfinished totals and by-category breakdown
+  // Unfinished Reimbursements
   const unfinishedStatuses = ['材料不齐', '待提交', '待审核', '待打款'];
   const placeholders = unfinishedStatuses.map(() => '?').join(',');
-  const unfinishedTotal = db.prepare(`SELECT SUM(amount) as totalAmount FROM reimbursements WHERE status IN (${placeholders})`).get(...unfinishedStatuses);
+  const reimUnfinished = db.prepare(`SELECT SUM(amount) as totalAmount FROM reimbursements WHERE status IN (${placeholders})`).get(...unfinishedStatuses);
   const unfinishedByCategory = db.prepare(`SELECT category, COUNT(*) as count, SUM(amount) as totalAmount FROM reimbursements WHERE status IN (${placeholders}) GROUP BY category ORDER BY totalAmount DESC`).all(...unfinishedStatuses);
   
   // Recent 5 items
@@ -333,16 +356,178 @@ function getDashboardStats() {
     ORDER BY month ASC
   `).all();
 
-  return {
-    totalCount: totalStats.count || 0,
-    totalAmount: totalStats.totalAmount || 0,
-    categoryStats,
-    statusStats,
-    unfinishedTotalAmount: unfinishedTotal.totalAmount || 0,
-    unfinishedByCategory,
-    recentItems,
-    monthlyStats
+  // --- Travel Stats ---
+  const travelTotal = db.prepare('SELECT COUNT(*) as count, SUM(total_amount) as totalAmount FROM travels').get();
+  const travelStatusStats = db.prepare('SELECT status, COUNT(*) as count, SUM(total_amount) as totalAmount FROM travels GROUP BY status').all();
+  
+  // Unfinished Travels
+   const travelUnfinished = db.prepare(`
+     SELECT COUNT(*) as count, SUM(total_amount) as totalAmount 
+     FROM travels 
+     WHERE status IN ('待提交', '待审核', '待打款', '材料不齐', 'pending_submission', 'pending_approval', 'pending_reimbursement', 'pending')
+   `).get();
+ 
+   // --- Data Merging & Formatting ---
+ 
+   // 1. Status Mapping (English -> Chinese)
+  const travelStatusMap = {
+    'pending_submission': '待提交',
+    'pending_approval': '待审核',
+    'pending_reimbursement': '待打款',
+    'pending_closure': '已完成',
+    'pending': '待处理'
   };
+
+  // 2. Merge Status Stats
+  const combinedStatusMap = new Map();
+  // Add Reimbursement Statuses
+  statusStats.forEach(item => {
+    combinedStatusMap.set(item.status, { count: item.count, totalAmount: item.totalAmount });
+  });
+  // Add Travel Statuses
+  travelStatusStats.forEach(item => {
+    const statusName = travelStatusMap[item.status] || item.status;
+    if (combinedStatusMap.has(statusName)) {
+      const existing = combinedStatusMap.get(statusName);
+      existing.count += item.count;
+      existing.totalAmount += item.totalAmount;
+    } else {
+      combinedStatusMap.set(statusName, { count: item.count, totalAmount: item.totalAmount });
+    }
+  });
+  const finalStatusStats = Array.from(combinedStatusMap.entries()).map(([status, data]) => ({
+    status,
+    ...data
+  }));
+
+  // 3. Merge Category Stats
+  const travelCategoryItem = {
+    category: '差旅',
+    count: travelTotal.count || 0,
+    totalAmount: travelTotal.totalAmount || 0
+  };
+  const finalCategoryStats = [...categoryStats, travelCategoryItem].sort((a, b) => b.totalAmount - a.totalAmount);
+
+  // 4. Merge Recent Items
+  // Fetch recent travels
+  const recentTravels = db.prepare('SELECT id, reason as name, date, total_amount as amount, status, created_at FROM travels ORDER BY created_at DESC LIMIT 5').all();
+  
+  const allRecent = [
+    ...recentItems.map(i => ({ ...i, type: 'reimbursement' })),
+    ...recentTravels.map(i => ({ 
+      ...i, 
+      status: travelStatusMap[i.status] || i.status,
+      type: 'travel' 
+    }))
+  ];
+  const finalRecentItems = allRecent
+    .sort((a, b) => b.created_at - a.created_at)
+    .slice(0, 5);
+
+  // 5. Merge Monthly Stats
+  const monthlyTravels = db.prepare(`
+    SELECT strftime('%Y-%m', date) as month, SUM(total_amount) as totalAmount, COUNT(*) as count 
+    FROM travels 
+    WHERE date >= date('now', 'start of month', '-5 months') 
+    GROUP BY month 
+    ORDER BY month ASC
+  `).all();
+
+  const monthlyMap = new Map();
+  monthlyStats.forEach(item => {
+    monthlyMap.set(item.month, { totalAmount: item.totalAmount, count: item.count });
+  });
+  monthlyTravels.forEach(item => {
+    if (monthlyMap.has(item.month)) {
+      const existing = monthlyMap.get(item.month);
+      existing.totalAmount += item.totalAmount;
+      existing.count += item.count;
+    } else {
+      monthlyMap.set(item.month, { totalAmount: item.totalAmount, count: item.count });
+    }
+  });
+  // Re-sort by month keys
+   const finalMonthlyStats = Array.from(monthlyMap.entries())
+     .sort((a, b) => a[0].localeCompare(b[0]))
+     .map(([month, data]) => ({ month, ...data }));
+ 
+   // 6. Merge Unfinished by Category
+   const finalUnfinishedByCategory = [...unfinishedByCategory];
+   if (travelUnfinished && travelUnfinished.totalAmount > 0) {
+     finalUnfinishedByCategory.push({
+       category: '差旅',
+       count: travelUnfinished.count || 0,
+       totalAmount: travelUnfinished.totalAmount
+     });
+     finalUnfinishedByCategory.sort((a, b) => b.totalAmount - a.totalAmount);
+   }
+
+   // --- Combined Stats ---
+   const totalCount = (reimTotal.count || 0) + (travelTotal.count || 0);
+   const totalAmount = (reimTotal.totalAmount || 0) + (travelTotal.totalAmount || 0);
+   const unfinishedTotalAmount = (reimUnfinished.totalAmount || 0) + (travelUnfinished.totalAmount || 0);
+ 
+   return {
+     totalCount,
+     totalAmount,
+     categoryStats: finalCategoryStats,
+     statusStats: finalStatusStats,
+     unfinishedTotalAmount,
+     unfinishedByCategory: finalUnfinishedByCategory,
+     recentItems: finalRecentItems,
+     monthlyStats: finalMonthlyStats,
+     travelStats: {
+       totalCount: travelTotal.count || 0,
+       totalAmount: travelTotal.totalAmount || 0,
+       statusStats: travelStatusStats
+     }
+   };
+ }
+
+function getTravels() {
+  const records = getDB().prepare('SELECT * FROM travels ORDER BY created_at DESC').all();
+  return records.map(r => ({
+    ...r,
+    itineraries: JSON.parse(r.itineraries || '[]')
+  }));
+}
+
+function addTravel(data) {
+  const stmt = getDB().prepare(`
+    INSERT INTO travels (id, applicant, date, reason, status, total_amount, itineraries, created_at)
+    VALUES (@id, @applicant, @date, @reason, @status, @total_amount, @itineraries, @created_at)
+  `);
+  
+  const transaction = getDB().transaction((travel) => {
+    stmt.run({
+      ...travel,
+      itineraries: JSON.stringify(travel.itineraries || []),
+      created_at: Date.now()
+    });
+  });
+  
+  return transaction(data);
+}
+
+function updateTravel(id, data) {
+  const fields = [];
+  const values = { id };
+  
+  if (data.applicant !== undefined) { fields.push('applicant = @applicant'); values.applicant = data.applicant; }
+  if (data.date !== undefined) { fields.push('date = @date'); values.date = data.date; }
+  if (data.reason !== undefined) { fields.push('reason = @reason'); values.reason = data.reason; }
+  if (data.status !== undefined) { fields.push('status = @status'); values.status = data.status; }
+  if (data.total_amount !== undefined) { fields.push('total_amount = @total_amount'); values.total_amount = data.total_amount; }
+  if (data.itineraries !== undefined) { fields.push('itineraries = @itineraries'); values.itineraries = JSON.stringify(data.itineraries); }
+  
+  if (fields.length === 0) return;
+  
+  const stmt = getDB().prepare(`UPDATE travels SET ${fields.join(', ')} WHERE id = @id`);
+  return stmt.run(values);
+}
+
+function deleteTravel(id) {
+  return getDB().prepare('DELETE FROM travels WHERE id = ?').run(id);
 }
 
 module.exports = {
@@ -359,5 +544,9 @@ module.exports = {
   getCategories,
   addCategory,
   deleteCategory,
-  updateCategoryOrder
+  updateCategoryOrder,
+  getTravels,
+  addTravel,
+  updateTravel,
+  deleteTravel
 };
