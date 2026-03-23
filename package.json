@@ -1,6 +1,6 @@
 {
   "name": "erp-system",
-  "version": "1.3.3",
+  "version": "1.4.0",
   "description": "A simple ERP system for reimbursement management",
   "main": "src/main/index.js",
   "scripts": {

@@ -31,6 +31,13 @@ contextBridge.exposeInMainWorld('api', {
   updateTravel: (data) => ipcRenderer.invoke('update-travel', data),
   deleteTravel: (id) => ipcRenderer.invoke('delete-travel', id),
 
+  // Claims
+  getClaims: () => ipcRenderer.invoke('get-claims'),
+  addClaim: (data) => ipcRenderer.invoke('add-claim', data),
+  deleteClaim: (id) => ipcRenderer.invoke('delete-claim', id),
+  removeClaimItem: (data) => ipcRenderer.invoke('remove-claim-item', data),
+  updateClaimItemsStatus: (data) => ipcRenderer.invoke('update-claim-items-status', data),
+
   exportZip: (ids) => {
     console.log('[Preload] invoking export-zip with:', ids);
     return ipcRenderer.invoke('export-zip', ids);

@@ -3,7 +3,7 @@ const path = require('path');
 const fs = require('fs-extra');
 const { v4: uuidv4 } = require('uuid');
 const Store = require('electron-store');
-const { initDB, addReimbursement, getReimbursements, getReimbursement, updateReimbursementStatus, deleteReimbursement, updateReimbursementProofs, updateReimbursementAmount, updateReimbursement, getDashboardStats, getCategories, addCategory, deleteCategory, updateCategoryOrder, getTravels, addTravel, updateTravel, deleteTravel } = require('./database');
+const { initDB, addReimbursement, getReimbursements, getReimbursement, updateReimbursementStatus, deleteReimbursement, updateReimbursementProofs, updateReimbursementAmount, updateReimbursement, getDashboardStats, getCategories, addCategory, deleteCategory, updateCategoryOrder, getTravels, addTravel, updateTravel, deleteTravel, getClaims, addClaim, deleteClaim, removeClaimItem, updateClaimItemsStatus } = require('./database');
 const archiver = require('archiver');
 const { createWriteStream } = require('fs');
 
@@ -477,6 +477,73 @@ function setupIPC(mainWindow) {
     } catch (error) {
       console.error('Error deleting travel:', error);
       throw error;
+    }
+  });
+
+  // --- Claims ---
+  ipcMain.handle('get-claims', () => {
+    try {
+      const storagePath = store.get('storagePath');
+      if (!storagePath) throw new Error('Storage path not set');
+      initDB(storagePath);
+      return getClaims();
+    } catch (error) {
+      console.error('Error getting claims:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle('add-claim', async (event, { data, item_ids }) => {
+    try {
+      const storagePath = store.get('storagePath');
+      if (!storagePath) throw new Error('Storage path not set');
+      initDB(storagePath);
+      
+      const claimId = uuidv4();
+      const actualId = addClaim({ id: claimId, ...data }, item_ids);
+      return { success: true, id: actualId };
+    } catch (error) {
+      console.error('Error adding claim:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('delete-claim', async (event, id) => {
+    try {
+      const storagePath = store.get('storagePath');
+      if (!storagePath) throw new Error('Storage path not set');
+      initDB(storagePath);
+      deleteClaim(id);
+      return { success: true };
+    } catch (error) {
+      console.error('Error deleting claim:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('remove-claim-item', async (event, { claim_id, item_id }) => {
+    try {
+      const storagePath = store.get('storagePath');
+      if (!storagePath) throw new Error('Storage path not set');
+      initDB(storagePath);
+      removeClaimItem(claim_id, item_id);
+      return { success: true };
+    } catch (error) {
+      console.error('Error removing claim item:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('update-claim-items-status', async (event, { claim_id, status }) => {
+    try {
+      const storagePath = store.get('storagePath');
+      if (!storagePath) throw new Error('Storage path not set');
+      initDB(storagePath);
+      updateClaimItemsStatus(claim_id, status);
+      return { success: true };
+    } catch (error) {
+      console.error('Error updating claim items status:', error);
+      return { success: false, error: error.message };
     }
   });
 

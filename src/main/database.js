@@ -61,6 +61,13 @@ function initDB(storagePath) {
         sort_order INTEGER DEFAULT 0,
         created_at INTEGER
       );
+
+      CREATE TABLE IF NOT EXISTS claims (
+        id TEXT PRIMARY KEY,
+        claim_no TEXT UNIQUE,
+        approval_date TEXT,
+        created_at INTEGER
+      );
     `);
     
     // Initialize default categories if table is empty
@@ -102,6 +109,17 @@ function initDB(storagePath) {
       db.exec("ALTER TABLE reimbursements ADD COLUMN receipt_no TEXT");
     } catch (e) {
       // Column already exists, ignore
+    }
+
+    // Migration: Add claim_id column to reimbursements if not exists
+    try {
+      const tableInfo = db.prepare("PRAGMA table_info(reimbursements)").all();
+      const hasClaimId = tableInfo.some(col => col.name === 'claim_id');
+      if (!hasClaimId) {
+        db.exec("ALTER TABLE reimbursements ADD COLUMN claim_id TEXT");
+      }
+    } catch (e) {
+      console.error('Migration error for claim_id:', e);
     }
 
     // Migration: Add total_amount to travels if not exists
@@ -538,6 +556,96 @@ function deleteTravel(id) {
   return getDB().prepare('DELETE FROM travels WHERE id = ?').run(id);
 }
 
+// --- Claims ---
+
+function getClaims() {
+  const db = getDB();
+  const claims = db.prepare('SELECT * FROM claims ORDER BY created_at DESC').all();
+  const claimsWithItems = claims.map(claim => {
+    const items = db.prepare('SELECT * FROM reimbursements WHERE claim_id = ?').all(claim.id);
+    const total_amount = items.reduce((sum, item) => sum + (item.amount || 0), 0);
+    return {
+      ...claim,
+      items,
+      total_amount
+    };
+  });
+  return claimsWithItems;
+}
+
+function addClaim(data, item_ids) {
+  const db = getDB();
+  
+  const transaction = db.transaction(() => {
+    let claimId = data.id;
+    // Check if claim_no already exists
+    const existing = db.prepare('SELECT id FROM claims WHERE claim_no = ?').get(data.claim_no);
+    if (existing) {
+      claimId = existing.id;
+      db.prepare('UPDATE claims SET approval_date = ? WHERE id = ?').run(data.approval_date, claimId);
+    } else {
+      db.prepare(`
+        INSERT INTO claims (id, claim_no, approval_date, created_at)
+        VALUES (@id, @claim_no, @approval_date, @created_at)
+      `).run({
+        id: claimId,
+        claim_no: data.claim_no,
+        approval_date: data.approval_date,
+        created_at: Date.now()
+      });
+    }
+    
+    if (item_ids && item_ids.length > 0) {
+      const updateReim = db.prepare('UPDATE reimbursements SET claim_id = ? WHERE id = ?');
+      item_ids.forEach(itemId => {
+        updateReim.run(claimId, itemId);
+      });
+    }
+    
+    return claimId;
+  });
+  
+  return transaction();
+}
+
+function deleteClaim(id) {
+  const db = getDB();
+  const updateReim = db.prepare('UPDATE reimbursements SET claim_id = NULL WHERE claim_id = ?');
+  const deleteStmt = db.prepare('DELETE FROM claims WHERE id = ?');
+  
+  const transaction = db.transaction(() => {
+    updateReim.run(id);
+    deleteStmt.run(id);
+  });
+  
+  return transaction();
+}
+
+function removeClaimItem(claim_id, item_id) {
+  return getDB().prepare('UPDATE reimbursements SET claim_id = NULL WHERE claim_id = ? AND id = ?').run(claim_id, item_id);
+}
+
+function updateClaimItemsStatus(claim_id, status) {
+  const db = getDB();
+  const items = db.prepare('SELECT id FROM reimbursements WHERE claim_id = ?').all(claim_id);
+  
+  const updateStatusStmt = db.prepare('UPDATE reimbursements SET status = ? WHERE id = ?');
+  const logStmt = db.prepare(`
+    INSERT INTO reimbursement_logs (reimbursement_id, action, details, created_at)
+    VALUES (?, ?, ?, ?)
+  `);
+  
+  const transaction = db.transaction(() => {
+    const now = Date.now();
+    items.forEach(item => {
+      updateStatusStmt.run(status, item.id);
+      logStmt.run(item.id, '状态变更', `报销单批量更新状态为: ${status}`, now);
+    });
+  });
+  
+  return transaction();
+}
+
 module.exports = {
   initDB,
   addReimbursement,
@@ -556,5 +664,10 @@ module.exports = {
   getTravels,
   addTravel,
   updateTravel,
-  deleteTravel
+  deleteTravel,
+  getClaims,
+  addClaim,
+  deleteClaim,
+  removeClaimItem,
+  updateClaimItemsStatus
 };

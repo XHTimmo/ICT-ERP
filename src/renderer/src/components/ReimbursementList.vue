@@ -43,9 +43,14 @@
           value-format="YYYY-MM-DD"
         />
       </div>
-      <el-button type="primary" @click="handleExport" :disabled="selectedRows.length === 0">
-        批量导出 ({{ selectedRows.length }})
-      </el-button>
+      <div class="actions-right">
+        <el-button type="success" @click="openClaimDialog" :disabled="selectedRows.length === 0">
+          导入报销单 ({{ selectedRows.length }})
+        </el-button>
+        <el-button type="primary" @click="handleExport" :disabled="selectedRows.length === 0">
+          批量导出 ({{ selectedRows.length }})
+        </el-button>
+      </div>
     </div>
     
     <el-table 
@@ -360,6 +365,35 @@
         </span>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="claimDialogVisible" title="导入报销单" width="500px">
+      <el-form :model="claimForm" label-width="100px" ref="claimFormRef">
+        <el-form-item label="报销单号" required>
+          <el-input v-model="claimForm.claim_no" placeholder="请输入报销单号" />
+        </el-form-item>
+        <el-form-item label="审核日期" required>
+          <el-date-picker
+            v-model="claimForm.approval_date"
+            type="date"
+            placeholder="选择审核日期"
+            value-format="YYYY-MM-DD"
+            style="width: 100%"
+          />
+        </el-form-item>
+        <el-form-item label="选中数量">
+          <el-text>{{ selectedRows.length }} 条</el-text>
+        </el-form-item>
+        <el-form-item label="预计总金额">
+          <el-text type="danger">¥ {{ selectedTotalAmount.toFixed(2) }}</el-text>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="claimDialogVisible = false">取消</el-button>
+          <el-button type="primary" @click="submitClaim" :loading="claimLoading">导入</el-button>
+        </span>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -378,6 +412,64 @@ const selectedRows = ref([]);
 const uploadDialogVisible = ref(false);
 const editDialogVisible = ref(false);
 const copyDialogVisible = ref(false);
+const claimDialogVisible = ref(false);
+const claimLoading = ref(false);
+const claimFormRef = ref(null);
+const claimForm = ref({
+  claim_no: '',
+  approval_date: dayjs().format('YYYY-MM-DD')
+});
+
+const selectedTotalAmount = computed(() => {
+  return selectedRows.value.reduce((sum, row) => sum + (row.amount || 0), 0);
+});
+
+const openClaimDialog = () => {
+  if (selectedRows.value.length === 0) return;
+  // check if any already has a claim_id (if we want to prevent re-import, but let's just let it overwrite or not check for now, 
+  // or we can just proceed)
+  claimForm.value = {
+    claim_no: '',
+    approval_date: dayjs().format('YYYY-MM-DD')
+  };
+  claimDialogVisible.value = true;
+};
+
+const submitClaim = async () => {
+  if (!claimForm.value.claim_no) {
+    ElMessage.warning('请输入报销单号');
+    return;
+  }
+  if (!claimForm.value.approval_date) {
+    ElMessage.warning('请选择审核日期');
+    return;
+  }
+  
+  claimLoading.value = true;
+  try {
+    const itemIds = selectedRows.value.map(row => row.id);
+    const result = await window.api.addClaim({
+      data: {
+        claim_no: claimForm.value.claim_no,
+        approval_date: claimForm.value.approval_date
+      },
+      item_ids: itemIds
+    });
+    
+    if (result.success) {
+      ElMessage.success('导入报销单成功');
+      claimDialogVisible.value = false;
+      fetchData(); // Refresh list to reflect changes (though claim_id is not shown in this table, it's good practice)
+    } else {
+      ElMessage.error('导入失败: ' + result.error);
+    }
+  } catch (error) {
+    ElMessage.error('导入失败: ' + error.message);
+  } finally {
+    claimLoading.value = false;
+  }
+};
+
 const uploadForm = ref({
   id: null,
   proofs: {

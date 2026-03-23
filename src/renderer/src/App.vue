@@ -5,9 +5,11 @@
         <h1>ERP 报销管理系统 <small class="version" v-if="appVersion" @click="handleCheckUpdate" title="点击检查更新">v{{ appVersion }}</small></h1>
         <el-menu mode="horizontal" :default-active="activeTab" @select="handleSelect">
           <el-menu-item index="dashboard">看板</el-menu-item>
-          <el-menu-item index="list">报销列表</el-menu-item>
+          <el-menu-item index="list">报销明细</el-menu-item>
+          <el-menu-item index="claims">报销单管理</el-menu-item>
           <el-menu-item index="travel">差旅管理</el-menu-item>
           <el-menu-item index="create">新增报销</el-menu-item>
+          <el-menu-item index="release">发布说明</el-menu-item>
           <el-menu-item index="settings">系统设置</el-menu-item>
         </el-menu>
       </div>
@@ -15,8 +17,10 @@
     <el-main>
       <Dashboard v-if="activeTab === 'dashboard'" />
       <ReimbursementList v-if="activeTab === 'list'" @refresh="fetchData" />
+      <ClaimManagement v-if="activeTab === 'claims'" />
       <TravelManagement v-if="activeTab === 'travel'" />
       <ReimbursementForm v-if="activeTab === 'create'" @success="activeTab = 'list'" />
+      <Release v-if="activeTab === 'release'" />
       <Settings v-if="activeTab === 'settings'" />
     </el-main>
   </el-container>
@@ -27,8 +31,10 @@ import { ref, onMounted, onUnmounted } from 'vue';
 import { ElNotification, ElMessageBox, ElMessage } from 'element-plus';
 import Dashboard from './components/Dashboard.vue';
 import ReimbursementList from './components/ReimbursementList.vue';
+import ClaimManagement from './components/ClaimManagement.vue';
 import TravelManagement from './components/TravelManagement.vue';
 import ReimbursementForm from './components/ReimbursementForm.vue';
+import Release from './components/Release.vue';
 import Settings from './components/Settings.vue';
 
 const activeTab = ref('dashboard');
