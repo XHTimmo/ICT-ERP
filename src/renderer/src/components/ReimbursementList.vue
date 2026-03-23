@@ -71,8 +71,9 @@
           </div>
         </template>
       </el-table-column>
-      <el-table-column prop="date" label="日期" width="120" />
+      <el-table-column prop="date" label="日期" width="120" sortable />
       <el-table-column prop="name" label="报销名称" width="150" />
+      <el-table-column prop="receipt_no" label="报销单号" width="150" sortable />
       <el-table-column prop="status" label="状态" width="140">
         <template #default="scope">
           <el-select 
@@ -261,6 +262,9 @@
         <el-form-item label="报销名称" required>
           <el-input v-model="copyForm.name" />
         </el-form-item>
+        <el-form-item label="报销单号">
+          <el-input v-model="copyForm.receipt_no" placeholder="选填" />
+        </el-form-item>
         <el-form-item label="日期" required>
           <el-date-picker
             v-model="copyForm.date"
@@ -309,6 +313,9 @@
       <el-form :model="editForm" label-width="100px">
         <el-form-item label="报销名称" required>
           <el-input v-model="editForm.name" />
+        </el-form-item>
+        <el-form-item label="报销单号">
+          <el-input v-model="editForm.receipt_no" placeholder="选填" />
         </el-form-item>
         <el-form-item label="日期" required>
           <el-date-picker
@@ -524,6 +531,7 @@ const handleEdit = (row) => {
   editForm.value = {
     id: row.id,
     name: row.name,
+    receipt_no: row.receipt_no || '',
     date: row.date,
     amount: row.amount,
     category: row.category,
@@ -535,6 +543,7 @@ const handleEdit = (row) => {
 const handleCopy = (row) => {
   copyForm.value = {
     name: row.name + ' (副本)',
+    receipt_no: '', // 复制时不保留报销单号
     date: dayjs().format('YYYY-MM-DD'),
     amount: row.amount,
     category: row.category,

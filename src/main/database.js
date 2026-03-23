@@ -24,6 +24,7 @@ function initDB(storagePath) {
       CREATE TABLE IF NOT EXISTS reimbursements (
         id TEXT PRIMARY KEY,
         serial_no INTEGER,
+        receipt_no TEXT,
         date TEXT,
         amount REAL,
         category TEXT,
@@ -96,6 +97,13 @@ function initDB(storagePath) {
       // Column already exists, ignore
     }
 
+    // Migration: Add receipt_no column if not exists
+    try {
+      db.exec("ALTER TABLE reimbursements ADD COLUMN receipt_no TEXT");
+    } catch (e) {
+      // Column already exists, ignore
+    }
+
     // Migration: Add total_amount to travels if not exists
     try {
       const tableInfo = db.prepare("PRAGMA table_info(travels)").all();
@@ -148,8 +156,8 @@ function getNextSerialNo() {
 
 function addReimbursement(data) {
   const stmt = getDB().prepare(`
-    INSERT INTO reimbursements (id, serial_no, date, amount, category, name, description, proofs, status, created_at)
-    VALUES (@id, @serial_no, @date, @amount, @category, @name, @description, @proofs, @status, @created_at)
+    INSERT INTO reimbursements (id, serial_no, receipt_no, date, amount, category, name, description, proofs, status, created_at)
+    VALUES (@id, @serial_no, @receipt_no, @date, @amount, @category, @name, @description, @proofs, @status, @created_at)
   `);
   
   const logStmt = getDB().prepare(`
@@ -242,7 +250,7 @@ function updateReimbursementAmount(id, amount, action, details) {
 }
 
 function updateReimbursement(id, updates, action, details) {
-  const allowedFields = ['name', 'date', 'amount', 'category', 'description'];
+  const allowedFields = ['name', 'date', 'amount', 'category', 'description', 'receipt_no'];
   const fieldsToUpdate = Object.keys(updates).filter(key => allowedFields.includes(key));
   
   if (fieldsToUpdate.length === 0) return;

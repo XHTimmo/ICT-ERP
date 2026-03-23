@@ -19,6 +19,10 @@
         <el-input v-model="form.name" placeholder="请输入报销名称" />
       </el-form-item>
 
+      <el-form-item label="报销单号" prop="receipt_no">
+        <el-input v-model="form.receipt_no" placeholder="请输入报销单号（选填）" />
+      </el-form-item>
+
       <el-form-item label="报销类别" prop="category">
         <el-select 
           v-model="form.category" 
@@ -191,10 +195,12 @@ const dragOver = reactive({
 });
 
 const form = reactive({
+  id: '',
   date: new Date().toISOString().split('T')[0],
   amount: 0,
-  category: '',
   name: '',
+  receipt_no: '',
+  category: '',
   description: '',
   proofs: {
     physical_photo: [],
