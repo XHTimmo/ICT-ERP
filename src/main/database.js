@@ -186,7 +186,12 @@ function addReimbursement(data) {
   const transaction = getDB().transaction((reimbursement) => {
     const now = Date.now();
     const serial = reimbursement.serial_no || getNextSerialNo();
-    stmt.run({ ...reimbursement, serial_no: serial, created_at: reimbursement.created_at || now });
+    stmt.run({ 
+      ...reimbursement, 
+      serial_no: serial, 
+      created_at: reimbursement.created_at || now,
+      receipt_no: reimbursement.receipt_no || null
+    });
     logStmt.run({
       reimbursement_id: reimbursement.id,
       action: '创建',

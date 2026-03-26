@@ -209,6 +209,7 @@ function setupIPC(mainWindow) {
         category: data.category,
         name: data.name,
         description: data.description,
+        receipt_no: data.receipt_no,
         proofs: JSON.stringify(proofs),
         status: data.status || '材料不齐', // Default status
         created_at: Date.now()
