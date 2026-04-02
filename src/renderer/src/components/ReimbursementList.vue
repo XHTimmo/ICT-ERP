@@ -61,6 +61,21 @@
         <el-button type="primary" @click="handleExport" :disabled="selectedRows.length === 0">
           批量导出 ({{ selectedRows.length }})
         </el-button>
+        <el-dropdown
+          trigger="click"
+          @command="handleSeparateExport"
+          :disabled="selectedRows.length === 0"
+        >
+          <el-button type="warning" :disabled="selectedRows.length === 0">
+            分别导出 ({{ selectedRows.length }})
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="group">按分组分别导出（已选）</el-dropdown-item>
+              <el-dropdown-item command="item">按明细分别导出（已选）</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
       </div>
     </div>
     
@@ -78,6 +93,31 @@
                 {{ group.status }}
               </el-tag>
               <el-text class="status-group-count">共 {{ group.total }} 条</el-text>
+              <el-text class="status-group-selected">已选 {{ getGroupSelectedCount(group.status) }} 条</el-text>
+            </div>
+            <div class="status-group-actions">
+              <el-button
+                size="small"
+                @click="selectGroupRows(group.status)"
+                :disabled="group.total === 0 || isGroupFullySelected(group.status)"
+              >
+                全选本组
+              </el-button>
+              <el-button
+                size="small"
+                @click="deselectGroupRows(group.status)"
+                :disabled="getGroupSelectedCount(group.status) === 0"
+              >
+                全不选本组
+              </el-button>
+              <el-button
+                size="small"
+                type="warning"
+                @click="exportSingleGroup(group.status)"
+                :disabled="getGroupSelectedCount(group.status) === 0"
+              >
+                导出本组已选
+              </el-button>
             </div>
           </div>
 
@@ -1013,68 +1053,170 @@ const submitUpload = async () => {
   }
 };
 
+const showExportMessage = (type, message) => {
+  ElMessage({
+    type,
+    message,
+    duration: 5000,
+    showClose: true
+  });
+};
+
+const exportZipByIds = async (ids, loadingText = '正在导出，请稍候...') => {
+  const loadingInstance = ElLoading.service({
+    lock: true,
+    text: loadingText,
+    background: 'rgba(0, 0, 0, 0.7)',
+  });
+
+  try {
+    if (!window.api || !window.api.exportZip) {
+      throw new Error('导出能力不可用');
+    }
+    return await window.api.exportZip(ids);
+  } finally {
+    loadingInstance.close();
+  }
+};
+
 const handleExport = async () => {
   try {
-    console.log('Export button clicked');
-    console.log('Selected rows:', selectedRows.value);
-    
     if (selectedRows.value.length === 0) {
-      console.log('No rows selected');
       ElMessage.warning('请先选择要导出的报销条例');
       return;
     }
-    
-    // Clone IDs to avoid proxy issues
+
     const ids = JSON.parse(JSON.stringify(selectedRows.value.map(r => r.id)));
-    console.log('IDs to export:', ids);
-    
-    const loadingInstance = ElLoading.service({
-      lock: true,
-      text: '正在导出，请稍候...',
-      background: 'rgba(0, 0, 0, 0.7)',
-    });
-    
-    try {
-      console.log('Calling window.api.exportZip...');
-      if (!window.api || !window.api.exportZip) {
-        throw new Error('Export API not available (window.api.exportZip is undefined)');
+
+    const result = await exportZipByIds(ids);
+    if (result.success) {
+      showExportMessage('success', '导出成功！文件已保存至: ' + result.filePath);
+      try {
+        await window.api.openFile(result.filePath);
+      } catch (e) {
       }
-      
-      const result = await window.api.exportZip(ids);
-      console.log('Export result received:', result);
-      loadingInstance.close();
-      
-      if (result.success) {
-        ElMessage.success({
-          message: '导出成功！文件已保存至: ' + result.filePath,
-          duration: 0,
-          showClose: true
-        });
-        // Try to open the file location
-        try {
-          await window.api.openFile(result.filePath);
-        } catch (e) {
-          console.error('Failed to open file:', e);
-        }
-      } else if (!result.cancelled) {
-        ElMessage.error({
-          message: '导出失败: ' + (result.error || '未知错误'),
-          duration: 0,
-          showClose: true
-        });
-      }
-    } catch (error) {
-      loadingInstance.close();
-      console.error('Export error caught in component:', error);
-      ElMessage.error({
-        message: '导出出错: ' + error.message,
-        duration: 0,
-        showClose: true
-      });
+    } else if (!result.cancelled) {
+      showExportMessage('error', '导出失败: ' + (result.error || '未知错误'));
     }
   } catch (outerError) {
-    console.error('Critical error in handleExport:', outerError);
-    alert('导出功能发生严重错误: ' + outerError.message);
+    showExportMessage('error', '导出出错: ' + outerError.message);
+  }
+};
+
+const getGroupRows = (status) => groupedStatusData.value[status] || [];
+
+const getGroupSelectedCount = (status) => {
+  const selectedIdSet = new Set(selectedRowIds.value);
+  return getGroupRows(status).reduce((count, row) => count + (selectedIdSet.has(row.id) ? 1 : 0), 0);
+};
+
+const isGroupFullySelected = (status) => {
+  const rows = getGroupRows(status);
+  if (rows.length === 0) return false;
+  return getGroupSelectedCount(status) === rows.length;
+};
+
+const selectGroupRows = (status) => {
+  const rows = getGroupRows(status);
+  if (!rows.length) return;
+  const idSet = new Set(selectedRowIds.value);
+  rows.forEach(row => idSet.add(row.id));
+  selectedRowIds.value = Array.from(idSet);
+};
+
+const deselectGroupRows = (status) => {
+  const groupIdSet = new Set(getGroupRows(status).map(row => row.id));
+  if (groupIdSet.size === 0) return;
+  selectedRowIds.value = selectedRowIds.value.filter(id => !groupIdSet.has(id));
+};
+
+const exportSingleGroup = async (status) => {
+  const selectedRowsInGroup = getGroupRows(status).filter(row => selectedRowIds.value.includes(row.id));
+  if (!selectedRowsInGroup.length) {
+    ElMessage.warning('请先选择该分组内要导出的报销明细');
+    return;
+  }
+
+  try {
+    const ids = selectedRowsInGroup.map(row => row.id);
+    const result = await exportZipByIds(ids, `正在导出「${status}」分组...`);
+    if (result.success) {
+      showExportMessage('success', `分组「${status}」导出成功！文件已保存至: ${result.filePath}`);
+      try {
+        await window.api.openFile(result.filePath);
+      } catch (e) {
+      }
+    } else if (!result.cancelled) {
+      showExportMessage('error', `分组「${status}」导出失败: ${result.error || '未知错误'}`);
+    }
+  } catch (error) {
+    showExportMessage('error', `分组「${status}」导出出错: ${error.message}`);
+  }
+};
+
+const handleSeparateExport = async (mode) => {
+  if (selectedRows.value.length === 0) {
+    ElMessage.warning('请先选择要导出的报销明细');
+    return;
+  }
+
+  if (mode === 'group') {
+    const groupedMap = selectedRows.value.reduce((acc, row) => {
+      const status = row.status || '未分类';
+      if (!acc[status]) acc[status] = [];
+      acc[status].push(row.id);
+      return acc;
+    }, {});
+
+    const statuses = sortStatuses(Object.keys(groupedMap));
+    const successList = [];
+    const failedList = [];
+
+    for (const status of statuses) {
+      try {
+        const result = await exportZipByIds(groupedMap[status], `正在分别导出分组「${status}」...`);
+        if (result.success) {
+          successList.push(status);
+        } else if (!result.cancelled) {
+          failedList.push(`${status}: ${result.error || '未知错误'}`);
+        }
+      } catch (error) {
+        failedList.push(`${status}: ${error.message}`);
+      }
+    }
+
+    if (successList.length) {
+      showExportMessage('success', `分别导出完成，成功分组 ${successList.length} 个：${successList.join('、')}`);
+    }
+    if (failedList.length) {
+      showExportMessage('error', `以下分组导出失败：${failedList.join('；')}`);
+    }
+    return;
+  }
+
+  if (mode === 'item') {
+    const successList = [];
+    const failedList = [];
+
+    for (const row of selectedRows.value) {
+      try {
+        const result = await exportZipByIds([row.id], `正在分别导出明细「${row.name}」...`);
+        if (result.success) {
+          successList.push(row.name || row.id);
+        } else if (!result.cancelled) {
+          failedList.push(`${row.name || row.id}: ${result.error || '未知错误'}`);
+        }
+      } catch (error) {
+        failedList.push(`${row.name || row.id}: ${error.message}`);
+      }
+    }
+
+    if (successList.length) {
+      showExportMessage('success', `分别导出完成，成功明细 ${successList.length} 条`);
+    }
+    if (failedList.length) {
+      showExportMessage('error', `以下明细导出失败：${failedList.join('；')}`);
+    }
   }
 };
 
@@ -1106,7 +1248,15 @@ defineExpose({ fetchData });
   padding: 20px;
 }
 .actions-bar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
   margin-bottom: 20px;
+  padding: 12px;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid #ebeef5;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -1149,6 +1299,16 @@ defineExpose({ fetchData });
 .status-group-count {
   color: #606266;
   font-size: 13px;
+}
+.status-group-selected {
+  color: #409eff;
+  font-size: 13px;
+}
+.status-group-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 .status-group-blue {
   border-left: 4px solid #1d4ed8;
@@ -1264,5 +1424,37 @@ defineExpose({ fetchData });
   color: #666;
   margin-top: 5px;
   word-break: break-all;
+}
+
+@media (max-width: 768px) {
+  .list-container {
+    padding: 12px;
+  }
+
+  .actions-bar {
+    top: 0;
+    padding: 10px;
+    gap: 8px;
+  }
+
+  .filters,
+  .actions-right {
+    width: 100%;
+  }
+
+  .filters :deep(.el-input),
+  .filters :deep(.el-select),
+  .filters :deep(.el-date-editor),
+  .actions-right :deep(.el-select),
+  .actions-right :deep(.el-button),
+  .actions-right :deep(.el-dropdown) {
+    width: 100% !important;
+  }
+
+  .status-group-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
+  }
 }
 </style>

@@ -5,6 +5,10 @@ contextBridge.exposeInMainWorld('api', {
   getStoragePath: () => ipcRenderer.invoke('get-storage-path'),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   setStoragePath: (path) => ipcRenderer.invoke('set-storage-path', path),
+  getCurrentRole: () => ipcRenderer.invoke('get-current-role'),
+  setCurrentRole: (role) => ipcRenderer.invoke('set-current-role', role),
+  getTravelPermissionControl: () => ipcRenderer.invoke('get-travel-permission-control'),
+  setTravelPermissionControl: (enabled) => ipcRenderer.invoke('set-travel-permission-control', enabled),
   selectDirectory: () => ipcRenderer.invoke('select-directory'),
   selectFile: (filters) => ipcRenderer.invoke('select-file', filters),
   
@@ -24,12 +28,14 @@ contextBridge.exposeInMainWorld('api', {
   updateReimbursement: (data) => ipcRenderer.invoke('update-reimbursement', data),
   deleteReimbursement: (id) => ipcRenderer.invoke('delete-reimbursement', id),
   exportTravelProofs: (data) => ipcRenderer.invoke('export-travel-proofs', data),
+  exportTravelReport: (data) => ipcRenderer.invoke('export-travel-report', data),
   
   // Travel Management
   getTravels: () => ipcRenderer.invoke('get-travels'),
   addTravel: (data) => ipcRenderer.invoke('add-travel', data),
   updateTravel: (data) => ipcRenderer.invoke('update-travel', data),
   deleteTravel: (id) => ipcRenderer.invoke('delete-travel', id),
+  getFileMeta: (filePath) => ipcRenderer.invoke('get-file-meta', filePath),
 
   // Claims
   getClaims: () => ipcRenderer.invoke('get-claims'),
@@ -44,7 +50,6 @@ contextBridge.exposeInMainWorld('api', {
   },
   
   // File
-  selectFile: (filters) => ipcRenderer.invoke('select-file', filters),
   openFile: (filePath) => ipcRenderer.invoke('open-file', filePath),
 
   // Auto Update

@@ -1,4 +1,4 @@
-const { ipcMain, dialog, app } = require('electron');
+const { ipcMain, dialog, app, BrowserWindow } = require('electron');
 const path = require('path');
 const fs = require('fs-extra');
 const { v4: uuidv4 } = require('uuid');
@@ -8,6 +8,33 @@ const archiver = require('archiver');
 const { createWriteStream } = require('fs');
 
 const store = new Store();
+
+const escapeHtml = (text = '') => String(text)
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;');
+
+const travelPermissionMap = {
+  admin: { upload: true, view: true, delete: true, export: true },
+  editor: { upload: true, view: true, delete: false, export: true },
+  viewer: { upload: false, view: true, delete: false, export: false }
+};
+
+const getCurrentRole = () => store.get('currentUserRole') || 'admin';
+const isTravelPermissionControlEnabled = () => store.get('enableTravelPermissionControl') === true;
+
+const ensureTravelPermission = (action) => {
+  if (!isTravelPermissionControlEnabled()) {
+    return;
+  }
+  const role = getCurrentRole();
+  const permissions = travelPermissionMap[role] || travelPermissionMap.admin;
+  if (!permissions[action]) {
+    throw new Error('当前用户无权限执行该操作');
+  }
+};
 
 function setupIPC(mainWindow) {
   // Get/Set Storage Path
@@ -23,6 +50,26 @@ function setupIPC(mainWindow) {
     if (!newPath) return false;
     store.set('storagePath', newPath);
     return initDB(newPath);
+  });
+
+  ipcMain.handle('get-current-role', () => {
+    return getCurrentRole();
+  });
+
+  ipcMain.handle('set-current-role', (event, role) => {
+    const validRole = ['admin', 'editor', 'viewer'].includes(role) ? role : 'admin';
+    store.set('currentUserRole', validRole);
+    return validRole;
+  });
+
+  ipcMain.handle('get-travel-permission-control', () => {
+    return isTravelPermissionControlEnabled();
+  });
+
+  ipcMain.handle('set-travel-permission-control', (event, enabled) => {
+    const nextValue = Boolean(enabled);
+    store.set('enableTravelPermissionControl', nextValue);
+    return nextValue;
   });
 
   ipcMain.handle('select-directory', async () => {
@@ -41,6 +88,21 @@ function setupIPC(mainWindow) {
     });
     if (result.canceled) return null;
     return result.filePaths; // Return array of paths
+  });
+
+  ipcMain.handle('get-file-meta', async (event, filePath) => {
+    if (!filePath) return null;
+    try {
+      const stat = await fs.stat(filePath);
+      return {
+        name: path.basename(filePath),
+        size: stat.size,
+        uploadedAt: Date.now(),
+        ext: path.extname(filePath).toLowerCase()
+      };
+    } catch (error) {
+      return null;
+    }
   });
 
   // Get Dashboard Stats
@@ -416,9 +478,119 @@ function setupIPC(mainWindow) {
     }
   });
 
+  ipcMain.handle('export-travel-report', async (event, { rows = [], format = 'excel' }) => {
+    try {
+      ensureTravelPermission('export');
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const isPdf = format === 'pdf';
+      const defaultPath = isPdf
+        ? `travel_export_${timestamp}.pdf`
+        : `travel_export_${timestamp}.csv`;
+
+      const { filePath } = await dialog.showSaveDialog(mainWindow, {
+        title: '导出差旅明细',
+        defaultPath,
+        filters: isPdf
+          ? [{ name: 'PDF Files', extensions: ['pdf'] }]
+          : [{ name: 'Excel Files', extensions: ['csv'] }]
+      });
+
+      if (!filePath) {
+        return { success: false, cancelled: true };
+      }
+
+      const header = ['ID', '序号', '报销单号', '日期', '报销名称', '金额', '类别', '状态', '备注', '目的地', '出差时间', '单据数量'];
+      const csvRows = rows.map((row, index) => {
+        const cols = [
+          row.id || '',
+          index + 1,
+          row.receipt_no || '',
+          row.date || '',
+          row.name || '',
+          row.amount ?? 0,
+          row.category || '差旅',
+          row.status || '',
+          row.description || '',
+          row.destination || '',
+          row.travelDates || '',
+          row.documentCount ?? 0
+        ];
+        return cols.map(value => `"${String(value).replace(/"/g, '""')}"`).join(',');
+      });
+
+      const csvContent = '\uFEFF' + header.join(',') + '\n' + csvRows.join('\n');
+
+      if (!isPdf) {
+        await fs.writeFile(filePath, csvContent, 'utf8');
+        return { success: true, filePath };
+      }
+
+      const tableRows = rows.map((row, index) => {
+        return `<tr>
+          <td>${escapeHtml(row.id || '')}</td>
+          <td>${index + 1}</td>
+          <td>${escapeHtml(row.receipt_no || '')}</td>
+          <td>${escapeHtml(row.date || '')}</td>
+          <td>${escapeHtml(row.name || '')}</td>
+          <td>${escapeHtml(String(row.amount ?? 0))}</td>
+          <td>${escapeHtml(row.category || '差旅')}</td>
+          <td>${escapeHtml(row.status || '')}</td>
+          <td>${escapeHtml(row.description || '')}</td>
+          <td>${escapeHtml(row.destination || '')}</td>
+          <td>${escapeHtml(row.travelDates || '')}</td>
+          <td>${escapeHtml(String(row.documentCount ?? 0))}</td>
+        </tr>`;
+      }).join('');
+
+      const html = `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>差旅导出</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", Arial, sans-serif; font-size: 12px; color: #303133; padding: 24px; }
+    h1 { margin: 0 0 12px 0; font-size: 18px; }
+    .meta { margin-bottom: 12px; color: #606266; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    th, td { border: 1px solid #dcdfe6; padding: 6px 8px; word-break: break-all; }
+    th { background: #f5f7fa; }
+  </style>
+</head>
+<body>
+  <h1>差旅明细导出清单</h1>
+  <div class="meta">共 ${rows.length} 条，导出时间 ${new Date().toLocaleString()}</div>
+  <table>
+    <thead>
+      <tr>${header.map(col => `<th>${escapeHtml(col)}</th>`).join('')}</tr>
+    </thead>
+    <tbody>${tableRows}</tbody>
+  </table>
+</body>
+</html>`;
+
+      const printWindow = new BrowserWindow({
+        show: false,
+        webPreferences: {
+          sandbox: true
+        }
+      });
+      await printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+      const pdfBuffer = await printWindow.webContents.printToPDF({
+        printBackground: true,
+        preferCSSPageSize: true
+      });
+      await fs.writeFile(filePath, pdfBuffer);
+      printWindow.destroy();
+      return { success: true, filePath };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
   // Travel Management
   ipcMain.handle('get-travels', () => {
     try {
+      ensureTravelPermission('view');
       const storagePath = store.get('storagePath');
       if (!storagePath) throw new Error('Storage path not set');
       initDB(storagePath);
@@ -431,6 +603,7 @@ function setupIPC(mainWindow) {
 
   ipcMain.handle('add-travel', (event, data) => {
     try {
+      ensureTravelPermission('upload');
       const storagePath = store.get('storagePath');
       if (!storagePath) throw new Error('Storage path not set');
       initDB(storagePath);
@@ -453,6 +626,7 @@ function setupIPC(mainWindow) {
 
   ipcMain.handle('update-travel', (event, { id, ...data }) => {
     try {
+      ensureTravelPermission('upload');
       const storagePath = store.get('storagePath');
       if (!storagePath) throw new Error('Storage path not set');
       initDB(storagePath);
@@ -471,6 +645,7 @@ function setupIPC(mainWindow) {
 
   ipcMain.handle('delete-travel', (event, id) => {
     try {
+      ensureTravelPermission('delete');
       const storagePath = store.get('storagePath');
       if (!storagePath) throw new Error('Storage path not set');
       initDB(storagePath);
