@@ -448,24 +448,49 @@ function setupIPC(mainWindow) {
         }
 
         const folderName = `${legDate}_${from}-${to}`;
-        
-        const types = {
-            ticket: '车票',
-            hotelInvoice: '酒店发票',
-            hotelStatement: '酒店水单',
-            travelRequest: '出差申请'
+
+        const normalizeTypeLabel = (rawType) => {
+          if (!rawType || rawType === '单据' || rawType === '车票') return '交通工具发票';
+          if (['ticket', 'transportTicket', 'transportInvoice'].includes(rawType)) return '交通工具发票';
+          if (rawType === 'hotelInvoice') return '酒店发票';
+          if (rawType === 'hotelStatement') return '酒店水单';
+          if (rawType === 'travelRequest') return '出差申请';
+          if (['出差申请', '酒店发票', '酒店水单', '交通工具发票'].includes(rawType)) return rawType;
+          return '交通工具发票';
         };
 
-        for (const [key, label] of Object.entries(types)) {
-            if (leg[key] && leg[key].path) {
-                try {
-                    if (await fs.pathExists(leg[key].path)) {
-                        archive.file(leg[key].path, { name: `${folderName}/${label}${path.extname(leg[key].path)}` });
-                    }
-                } catch (e) {
-                    console.error(`File access error: ${leg[key].path}`, e);
-                }
-            }
+        const addedPaths = new Set();
+        const nameCounter = {};
+        const appendFile = async (filePath, rawType) => {
+          if (!filePath || typeof filePath !== 'string') return;
+          const absPath = filePath;
+          if (addedPaths.has(absPath)) return;
+          try {
+            if (!(await fs.pathExists(absPath))) return;
+            const label = normalizeTypeLabel(rawType);
+            const next = (nameCounter[label] || 0) + 1;
+            nameCounter[label] = next;
+            const suffix = next > 1 ? `_${next}` : '';
+            archive.file(absPath, { name: `${folderName}/${label}${suffix}${path.extname(absPath)}` });
+            addedPaths.add(absPath);
+          } catch (e) {
+            console.error(`File access error: ${absPath}`, e);
+          }
+        };
+
+        for (const doc of (Array.isArray(leg.documents) ? leg.documents : [])) {
+          await appendFile(doc?.path, doc?.type);
+        }
+
+        const legacyTypes = {
+          ticket: '交通工具发票',
+          hotelInvoice: '酒店发票',
+          hotelStatement: '酒店水单',
+          travelRequest: '出差申请'
+        };
+        for (const [key, label] of Object.entries(legacyTypes)) {
+          const filePath = leg?.[key]?.path || leg?.[key]?.raw?.path || leg?.[key];
+          await appendFile(filePath, label);
         }
       }
 
@@ -499,7 +524,7 @@ function setupIPC(mainWindow) {
         return { success: false, cancelled: true };
       }
 
-      const header = ['ID', '序号', '报销单号', '日期', '报销名称', '金额', '类别', '状态', '备注', '目的地', '出差时间', '单据数量'];
+      const header = ['ID', '序号', '报销单号', '日期', '报销名称', '金额', '类别', '状态', '备注', '目的地', '出差时间', '单据数量', '消费条例数量', '消费金额'];
       const csvRows = rows.map((row, index) => {
         const cols = [
           row.id || '',
@@ -513,7 +538,9 @@ function setupIPC(mainWindow) {
           row.description || '',
           row.destination || '',
           row.travelDates || '',
-          row.documentCount ?? 0
+          row.documentCount ?? 0,
+          row.expenseCount ?? 0,
+          row.expenseTotal ?? 0
         ];
         return cols.map(value => `"${String(value).replace(/"/g, '""')}"`).join(',');
       });
@@ -539,6 +566,8 @@ function setupIPC(mainWindow) {
           <td>${escapeHtml(row.destination || '')}</td>
           <td>${escapeHtml(row.travelDates || '')}</td>
           <td>${escapeHtml(String(row.documentCount ?? 0))}</td>
+          <td>${escapeHtml(String(row.expenseCount ?? 0))}</td>
+          <td>${escapeHtml(String(row.expenseTotal ?? 0))}</td>
         </tr>`;
       }).join('');
 

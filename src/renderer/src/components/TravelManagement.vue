@@ -81,10 +81,18 @@
                   {{ getDocuments(scope.row).length }}
                 </template>
               </el-table-column>
-              <el-table-column label="操作" width="260">
+              <el-table-column label="消费条例" width="220">
+                <template #default="scope">
+                  {{ getExpenses(scope.row).length }} 条 / ¥ {{ getExpenseTotal(scope.row).toFixed(2) }}
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="340">
                 <template #default="scope">
                   <el-button link type="primary" size="small" @click="openDocumentManager(props.row, scope.$index)" :disabled="!permissions.canUpload">
                     单据管理
+                  </el-button>
+                  <el-button link type="primary" size="small" @click="openExpenseManager(props.row, scope.$index)" :disabled="!permissions.canUpload">
+                    消费条例
                   </el-button>
                   <el-button link type="primary" size="small" @click="openDocumentPreviewList(props.row, scope.$index)" :disabled="!permissions.canView">
                     查看单据
@@ -196,6 +204,13 @@
                 </el-button>
               </template>
             </el-table-column>
+            <el-table-column label="消费条例" width="170">
+              <template #default="scope">
+                <el-button link type="primary" size="small" @click="openExpenseManager(currentTravel, scope.$index)">
+                  管理消费({{ getExpenses(scope.row).length }})
+                </el-button>
+              </template>
+            </el-table-column>
             <el-table-column label="操作" width="80" align="center">
               <template #default="scope">
                 <el-button type="danger" link size="small" @click="removeItinerary(scope.$index)">删除</el-button>
@@ -259,7 +274,18 @@
     <el-dialog v-model="docDialogVisible" title="单据管理" width="860px">
       <div class="upload-area" :class="{ 'is-dragover': docDragOver }" @dragover.prevent="docDragOver = true" @dragleave.prevent="docDragOver = false" @drop.prevent="handleDropDocuments">
         <el-icon class="upload-icon"><Upload /></el-icon>
-        <div class="upload-text">点击或拖拽上传单据（支持单张或多张，格式：JPG/PNG/PDF，单文件不超过10MB）</div>
+        <div class="upload-text">点击或拖拽上传单据（单文件不超过10MB）</div>
+        <div class="upload-type-row">
+          <el-select v-model="currentDocumentType" style="width: 220px" size="small">
+            <el-option
+              v-for="item in documentTypeOptions"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-select>
+          <span class="upload-type-hint">{{ currentDocumentTypeHint }}</span>
+        </div>
         <el-button type="primary" size="small" @click.stop="selectDocumentFiles" :disabled="!permissions.canUpload">选择文件</el-button>
       </div>
 
@@ -270,6 +296,7 @@
             <div v-else class="doc-pdf">PDF</div>
           </div>
           <div class="doc-name" :title="doc.name">{{ doc.name }}</div>
+          <div class="doc-meta">单据类型：{{ doc.type || '交通工具发票' }}</div>
           <div class="doc-meta">上传时间：{{ formatTime(doc.uploadedAt) }}</div>
           <div class="doc-meta">文件大小：{{ formatSize(doc.size) }}</div>
           <div class="doc-actions">
@@ -317,6 +344,45 @@
         />
       </div>
     </el-dialog>
+
+    <el-dialog v-model="expenseDialogVisible" title="消费条例管理" width="860px">
+      <div class="expense-toolbar">
+        <el-button type="primary" size="small" @click="addExpenseItem" :disabled="!permissions.canUpload">
+          <el-icon><Plus /></el-icon> 添加消费条例
+        </el-button>
+      </div>
+      <el-table :data="editingExpenses" border style="width: 100%" empty-text="暂无消费条例">
+        <el-table-column label="费用类型" width="180">
+          <template #default="scope">
+            <el-select v-model="scope.row.type" placeholder="请选择类型" size="small">
+              <el-option v-for="option in expenseTypeOptions" :key="option" :label="option" :value="option" />
+            </el-select>
+          </template>
+        </el-table-column>
+        <el-table-column label="金额" width="170">
+          <template #default="scope">
+            <el-input-number v-model="scope.row.amount" :min="0" :precision="2" :step="10" size="small" style="width: 150px" />
+          </template>
+        </el-table-column>
+        <el-table-column label="备注">
+          <template #default="scope">
+            <el-input v-model="scope.row.note" placeholder="可填写说明（可选）" size="small" />
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="90" align="center">
+          <template #default="scope">
+            <el-button type="danger" link size="small" @click="removeExpenseItem(scope.$index)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div class="expense-summary">合计：¥ {{ expenseTotalInDialog.toFixed(2) }}</div>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="expenseDialogVisible = false">取消</el-button>
+          <el-button type="primary" @click="saveExpenses" :disabled="!permissions.canUpload">保存</el-button>
+        </span>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -331,6 +397,7 @@ const dialogVisible = ref(false);
 const itineraryDialogVisible = ref(false);
 const docDialogVisible = ref(false);
 const previewDialogVisible = ref(false);
+const expenseDialogVisible = ref(false);
 const previewFullscreen = ref(false);
 const isEdit = ref(false);
 const isEditItinerary = ref(false);
@@ -357,6 +424,34 @@ const permissions = computed(() => {
 const statusOptions = ['材料不齐', '待提交', '待审核', '待打款', '已完成'];
 const allowedExtensions = ['jpg', 'jpeg', 'png', 'pdf'];
 const maxFileSize = 10 * 1024 * 1024;
+const documentTypeOptions = [
+  { value: '出差申请', label: '出差申请（仅 PDF）' },
+  { value: '酒店发票', label: '酒店发票' },
+  { value: '酒店水单', label: '酒店水单' },
+  { value: '交通工具发票', label: '交通工具发票' }
+];
+const defaultDocumentType = '交通工具发票';
+const currentDocumentType = ref(defaultDocumentType);
+const normalizeDocumentType = (type) => {
+  if (!type || type === '单据' || type === '车票') return '交通工具发票';
+  if (['ticket', 'transportTicket', 'transportInvoice'].includes(type)) return '交通工具发票';
+  if (type === 'hotelInvoice') return '酒店发票';
+  if (type === 'hotelStatement') return '酒店水单';
+  if (type === 'travelRequest') return '出差申请';
+  return documentTypeOptions.some(item => item.value === type) ? type : defaultDocumentType;
+};
+const getAllowedExtensionsByType = (type) => {
+  if (normalizeDocumentType(type) === '出差申请') return ['pdf'];
+  return allowedExtensions;
+};
+const currentDocumentTypeHint = computed(() => {
+  const extList = getAllowedExtensionsByType(currentDocumentType.value).map(ext => ext.toUpperCase()).join(' / ');
+  return `当前可上传：${extList}`;
+});
+const expenseTypeOptions = ['车票费用', '酒店费用', '会议费用', '餐饮费用', '其他费用'];
+const expenseTotalInDialog = computed(() =>
+  editingExpenses.value.reduce((sum, item) => sum + Number(item.amount || 0), 0)
+);
 
 const filters = reactive({
   keyword: '',
@@ -392,6 +487,8 @@ const editingDocumentContext = ref(null);
 const currentPreviewDoc = ref(null);
 const previewScale = ref(1);
 const previewRotate = ref(0);
+const editingExpenses = ref([]);
+const editingExpenseContext = ref(null);
 
 const previewStyle = computed(() => ({
   transform: `scale(${previewScale.value}) rotate(${previewRotate.value}deg)`
@@ -436,11 +533,11 @@ const normalizeDocuments = (itinerary) => {
       path: item.path,
       size: Number(item.size || 0),
       uploadedAt: Number(item.uploadedAt || Date.now()),
-      type: item.type || '单据'
+      type: normalizeDocumentType(item.type)
     }));
   if (normalized.length) return normalized;
   const legacyMap = [
-    { key: 'ticket', label: '车票' },
+    { key: 'ticket', label: '交通工具发票' },
     { key: 'hotelInvoice', label: '酒店发票' },
     { key: 'hotelStatement', label: '酒店水单' },
     { key: 'travelRequest', label: '出差申请' }
@@ -456,17 +553,30 @@ const normalizeDocuments = (itinerary) => {
         path: filePath,
         size: Number(file?.size || 0),
         uploadedAt: Number(file?.uploadedAt || Date.now()),
-        type: label
+        type: normalizeDocumentType(label)
       };
     })
     .filter(Boolean);
+};
+
+const normalizeExpenses = (itinerary) => {
+  const expenses = Array.isArray(itinerary?.expenses) ? itinerary.expenses : [];
+  return expenses
+    .map(item => ({
+      id: item?.id || `${Date.now()}_${Math.random().toString(16).slice(2)}`,
+      type: item?.type || '其他费用',
+      amount: Number(item?.amount || 0),
+      note: item?.note || ''
+    }))
+    .filter(item => item.type);
 };
 
 const attachNormalizedDocuments = (travel) => ({
   ...travel,
   itineraries: (travel.itineraries || []).map(it => ({
     ...it,
-    documents: normalizeDocuments(it)
+    documents: normalizeDocuments(it),
+    expenses: normalizeExpenses(it)
   }))
 });
 
@@ -545,6 +655,9 @@ const getTravelDates = (row) => {
 };
 
 const getDocuments = (itinerary) => normalizeDocuments(itinerary);
+const getExpenses = (itinerary) => normalizeExpenses(itinerary);
+const getExpenseTotal = (itinerary) =>
+  getExpenses(itinerary).reduce((sum, item) => sum + Number(item.amount || 0), 0);
 
 const isImageDoc = (doc) => ['jpg', 'jpeg', 'png', 'webp'].includes((doc.path.split('.').pop() || '').toLowerCase());
 
@@ -590,7 +703,11 @@ const handleEdit = (row) => {
   currentTravel.reason = row.reason;
   currentTravel.status = row.status;
   currentTravel.total_amount = row.total_amount || 0;
-  currentTravel.itineraries = JSON.parse(JSON.stringify((row.itineraries || []).map(it => ({ ...it, documents: normalizeDocuments(it) }))));
+  currentTravel.itineraries = JSON.parse(JSON.stringify((row.itineraries || []).map(it => ({
+    ...it,
+    documents: normalizeDocuments(it),
+    expenses: normalizeExpenses(it)
+  }))));
   dialogVisible.value = true;
 };
 
@@ -618,7 +735,8 @@ const addItinerary = () => {
     from: '',
     to: '',
     transport: '',
-    documents: []
+    documents: [],
+    expenses: []
   });
 };
 
@@ -633,7 +751,11 @@ const handleSave = async () => {
     loading.value = true;
     try {
       const travelData = JSON.parse(JSON.stringify(currentTravel));
-      travelData.itineraries = travelData.itineraries.map(it => ({ ...it, documents: normalizeDocuments(it) }));
+      travelData.itineraries = travelData.itineraries.map(it => ({
+        ...it,
+        documents: normalizeDocuments(it),
+        expenses: normalizeExpenses(it)
+      }));
       if (isEdit.value) {
         await window.api.updateTravel(travelData);
         showMessage('success', '更新成功');
@@ -659,7 +781,7 @@ const handleInlineAddItinerary = (row) => {
   isEditItinerary.value = false;
   editingItineraryIndex.value = -1;
   currentTravelRow.value = row;
-  Object.assign(newItinerary, { date: [], from: '', to: '', transport: '', documents: [] });
+  Object.assign(newItinerary, { date: [], from: '', to: '', transport: '', documents: [], expenses: [] });
   itineraryDialogVisible.value = true;
 };
 
@@ -676,7 +798,8 @@ const handleEditItinerary = (row, itinerary, index) => {
     from: itinerary.from || '',
     to: itinerary.to || '',
     transport: itinerary.transport || '',
-    documents: normalizeDocuments(itinerary)
+    documents: normalizeDocuments(itinerary),
+    expenses: normalizeExpenses(itinerary)
   });
   itineraryDialogVisible.value = true;
 };
@@ -685,7 +808,11 @@ const persistRowItineraries = async (row) => {
   if (!row?.id) return;
   await window.api.updateTravel({
     id: row.id,
-    itineraries: JSON.parse(JSON.stringify((row.itineraries || []).map(it => ({ ...it, documents: normalizeDocuments(it) }))))
+    itineraries: JSON.parse(JSON.stringify((row.itineraries || []).map(it => ({
+      ...it,
+      documents: normalizeDocuments(it),
+      expenses: normalizeExpenses(it)
+    }))))
   });
 };
 
@@ -694,7 +821,8 @@ const saveItinerary = async () => {
   if (!currentTravelRow.value.itineraries) currentTravelRow.value.itineraries = [];
   const itineraryData = JSON.parse(JSON.stringify({
     ...newItinerary,
-    documents: normalizeDocuments(newItinerary)
+    documents: normalizeDocuments(newItinerary),
+    expenses: normalizeExpenses(newItinerary)
   }));
   if (isEditItinerary.value && editingItineraryIndex.value !== -1) {
     currentTravelRow.value.itineraries[editingItineraryIndex.value] = itineraryData;
@@ -715,6 +843,7 @@ const openDocumentManager = (travelRow, itineraryIndex) => {
   if (!travelRow?.itineraries?.[itineraryIndex]) return;
   editingDocumentContext.value = { travelRow, itineraryIndex };
   editingDocuments.value = JSON.parse(JSON.stringify(getDocuments(travelRow.itineraries[itineraryIndex])));
+  currentDocumentType.value = defaultDocumentType;
   docDialogVisible.value = true;
 };
 
@@ -722,9 +851,54 @@ const openDocumentPreviewList = (travelRow, itineraryIndex) => {
   openDocumentManager(travelRow, itineraryIndex);
 };
 
-const validatePathByRule = async (filePath) => {
+const openExpenseManager = (travelRow, itineraryIndex) => {
+  if (!travelRow?.itineraries?.[itineraryIndex]) return;
+  editingExpenseContext.value = { travelRow, itineraryIndex };
+  editingExpenses.value = JSON.parse(JSON.stringify(getExpenses(travelRow.itineraries[itineraryIndex])));
+  if (!editingExpenses.value.length) {
+    editingExpenses.value = [{ id: `${Date.now()}_${Math.random().toString(16).slice(2)}`, type: '车票费用', amount: 0, note: '' }];
+  }
+  expenseDialogVisible.value = true;
+};
+
+const addExpenseItem = () => {
+  editingExpenses.value.push({
+    id: `${Date.now()}_${Math.random().toString(16).slice(2)}`,
+    type: '其他费用',
+    amount: 0,
+    note: ''
+  });
+};
+
+const removeExpenseItem = (index) => {
+  editingExpenses.value.splice(index, 1);
+};
+
+const saveExpenses = async () => {
+  const context = editingExpenseContext.value;
+  if (!context) return;
+  const itinerary = context.travelRow?.itineraries?.[context.itineraryIndex];
+  if (!itinerary) return;
+  itinerary.expenses = JSON.parse(JSON.stringify(normalizeExpenses({ expenses: editingExpenses.value })));
+  try {
+    if (context.travelRow?.id) {
+      await persistRowItineraries(context.travelRow);
+      await loadTravels();
+    }
+    showMessage('success', '消费条例保存成功');
+    expenseDialogVisible.value = false;
+  } catch (error) {
+    showMessage('error', '消费条例保存失败');
+  }
+};
+
+const validatePathByRule = async (filePath, docType) => {
   const ext = (filePath.split('.').pop() || '').toLowerCase();
-  if (!allowedExtensions.includes(ext)) {
+  const allowedByType = getAllowedExtensionsByType(docType);
+  if (!allowedByType.includes(ext)) {
+    if (normalizeDocumentType(docType) === '出差申请') {
+      return { valid: false, message: '出差申请仅支持 PDF 文件' };
+    }
     return { valid: false, message: `不支持文件类型: ${ext || '未知'}` };
   }
   const meta = await window.api.getFileMeta(filePath);
@@ -737,10 +911,11 @@ const validatePathByRule = async (filePath) => {
 
 const addDocumentsByPaths = async (paths) => {
   if (!paths?.length) return;
+  const docType = normalizeDocumentType(currentDocumentType.value);
   const success = [];
   const warnings = [];
   for (const filePath of paths) {
-    const result = await validatePathByRule(filePath);
+    const result = await validatePathByRule(filePath, docType);
     if (!result.valid) {
       warnings.push(result.message);
       continue;
@@ -752,7 +927,7 @@ const addDocumentsByPaths = async (paths) => {
       path: filePath,
       size: meta.size,
       uploadedAt: Date.now(),
-      type: '单据'
+      type: docType
     });
   }
   if (success.length) {
@@ -767,7 +942,8 @@ const selectDocumentFiles = async () => {
     showMessage('warning', '当前角色无上传权限');
     return;
   }
-  const paths = await window.api.selectFile([{ name: 'Allowed Files', extensions: allowedExtensions }]);
+  const extList = getAllowedExtensionsByType(currentDocumentType.value);
+  const paths = await window.api.selectFile([{ name: 'Allowed Files', extensions: extList }]);
   if (paths && paths.length) await addDocumentsByPaths(paths);
 };
 
@@ -843,6 +1019,9 @@ const openCurrentFile = async () => {
 
 const buildExportRow = (row) => {
   const docsCount = (row.itineraries || []).reduce((sum, it) => sum + getDocuments(it).length, 0);
+  const expenseItems = (row.itineraries || []).flatMap(it => getExpenses(it));
+  const expenseCount = expenseItems.length;
+  const expenseTotal = expenseItems.reduce((sum, item) => sum + Number(item.amount || 0), 0);
   return {
     id: row.id,
     date: row.date,
@@ -853,7 +1032,9 @@ const buildExportRow = (row) => {
     description: row.reason || '',
     destination: getMainDestination(row),
     travelDates: getTravelDates(row),
-    documentCount: docsCount
+    documentCount: docsCount,
+    expenseCount,
+    expenseTotal: expenseTotal.toFixed(2)
   };
 };
 
@@ -971,6 +1152,18 @@ const handleExport = async (format) => {
   margin-bottom: 10px;
   color: #606266;
 }
+.upload-type-row {
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.upload-type-hint {
+  font-size: 12px;
+  color: #909399;
+}
 .doc-grid {
   margin-top: 16px;
   display: grid;
@@ -1019,6 +1212,15 @@ const handleExport = async (format) => {
   margin-top: 8px;
   display: flex;
   gap: 8px;
+}
+.expense-toolbar {
+  margin-bottom: 10px;
+}
+.expense-summary {
+  margin-top: 12px;
+  text-align: right;
+  color: #303133;
+  font-weight: 600;
 }
 .preview-toolbar {
   display: flex;
