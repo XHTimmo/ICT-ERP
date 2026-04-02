@@ -27,11 +27,12 @@
           clearable 
           style="width: 150px"
         >
-          <el-option label="材料不齐" value="材料不齐" />
-          <el-option label="待提交" value="待提交" />
-          <el-option label="待审核" value="待审核" />
-          <el-option label="待打款" value="待打款" />
-          <el-option label="已完成" value="已完成" />
+          <el-option
+            v-for="status in statusFilterOptions"
+            :key="status"
+            :label="status"
+            :value="status"
+          />
         </el-select>
         <el-date-picker
           v-model="filters.dateRange"
@@ -44,6 +45,16 @@
         />
       </div>
       <div class="actions-right">
+        <el-switch
+          v-model="showCompleted"
+          inline-prompt
+          active-text="显示已完成"
+          inactive-text="隐藏已完成"
+        />
+        <el-select v-model="pageSize" style="width: 110px">
+          <el-option :value="10" label="每页10条" />
+          <el-option :value="20" label="每页20条" />
+        </el-select>
         <el-button type="success" @click="openClaimDialog" :disabled="selectedRows.length === 0">
           导入报销单 ({{ selectedRows.length }})
         </el-button>
@@ -53,124 +64,164 @@
       </div>
     </div>
     
-    <el-table 
-      :data="filteredTableData" 
-      style="width: 100%" 
-      v-loading="loading"
-      @selection-change="handleSelectionChange"
-    >
-      <el-table-column type="selection" width="55" />
-      <el-table-column type="expand">
-        <template #default="props">
-          <div class="expand-content">
-            <h4>操作日志</h4>
-            <el-timeline>
-              <el-timeline-item
-                v-for="(activity, index) in props.row.logs"
-                :key="index"
-                :timestamp="formatTime(activity.created_at)"
-              >
-                {{ activity.action }}: {{ activity.details }}
-              </el-timeline-item>
-            </el-timeline>
+    <div v-loading="loading" class="grouped-list">
+      <template v-if="statusGroups.length">
+        <div
+          v-for="group in statusGroups"
+          :key="group.status"
+          class="status-group-card"
+          :class="`status-group-${getStatusColor(group.status)}`"
+        >
+          <div class="status-group-header">
+            <div class="status-group-title">
+              <el-tag :type="getStatusTagType(group.status)" size="large">
+                {{ group.status }}
+              </el-tag>
+              <el-text class="status-group-count">共 {{ group.total }} 条</el-text>
+            </div>
           </div>
-        </template>
-      </el-table-column>
-      <el-table-column prop="date" label="日期" width="120" sortable />
-      <el-table-column prop="name" label="报销名称" width="150" />
-      <el-table-column prop="receipt_no" label="报销单号" width="150" sortable />
-      <el-table-column prop="status" label="状态" width="140">
-        <template #default="scope">
-          <el-select 
-            v-model="scope.row.status" 
-            size="small"
-            @change="(val) => handleStatusChange(scope.row, val)"
+
+          <el-skeleton v-if="group.loading" :rows="3" animated />
+          <el-table
+            v-else
+            :data="group.pageData"
+            style="width: 100%"
+            :row-key="(row) => row.id"
           >
-            <el-option label="材料不齐" value="材料不齐" />
-            <el-option label="待提交" value="待提交" />
-            <el-option label="待审核" value="待审核" />
-            <el-option label="待打款" value="待打款" />
-            <el-option label="已完成" value="已完成" />
-          </el-select>
-        </template>
-      </el-table-column>
-      <el-table-column prop="category" label="类别" width="100" />
-      <el-table-column prop="amount" label="金额" width="120">
-        <template #default="scope">
-          ¥ {{ scope.row.amount.toFixed(2) }}
-        </template>
-      </el-table-column>
-      <el-table-column prop="description" label="备注" />
-      <el-table-column label="凭证" width="300">
-        <template #default="scope">
-          <div class="proof-buttons">
-            <el-badge :value="getProofCount(scope.row.proofs.physical_photo)" :hidden="!getProofCount(scope.row.proofs.physical_photo)" type="primary">
-              <el-button 
-                size="small" 
-                type="primary" 
-                plain
-                @click="viewProofs(scope.row.proofs.physical_photo, '实物照片')"
-                :disabled="!getProofCount(scope.row.proofs.physical_photo)"
-              >
-                实物
-              </el-button>
-            </el-badge>
-            <el-badge :value="getProofCount(scope.row.proofs.electronic_invoice)" :hidden="!getProofCount(scope.row.proofs.electronic_invoice)" type="success">
-              <el-button 
-                size="small" 
-                type="success" 
-                plain
-                @click="viewProofs(scope.row.proofs.electronic_invoice, '电子发票')"
-                :disabled="!getProofCount(scope.row.proofs.electronic_invoice)"
-              >
-                发票
-              </el-button>
-            </el-badge>
-            <el-badge :value="getProofCount(scope.row.proofs.payment_screenshot)" :hidden="!getProofCount(scope.row.proofs.payment_screenshot)" type="warning">
-              <el-button 
-                size="small" 
-                type="warning" 
-                plain
-                @click="viewProofs(scope.row.proofs.payment_screenshot, '支付截图')"
-                :disabled="!getProofCount(scope.row.proofs.payment_screenshot)"
-              >
-                支付
-              </el-button>
-            </el-badge>
+            <el-table-column width="60" label="选择">
+              <template #default="scope">
+                <el-checkbox
+                  :model-value="isRowSelected(scope.row.id)"
+                  @change="(checked) => toggleRowSelection(scope.row.id, checked)"
+                />
+              </template>
+            </el-table-column>
+            <el-table-column type="expand">
+              <template #default="props">
+                <div class="expand-content">
+                  <h4>操作日志</h4>
+                  <el-timeline>
+                    <el-timeline-item
+                      v-for="(activity, index) in props.row.logs"
+                      :key="index"
+                      :timestamp="formatTime(activity.created_at)"
+                    >
+                      {{ activity.action }}: {{ activity.details }}
+                    </el-timeline-item>
+                  </el-timeline>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column prop="date" label="日期" width="120" sortable />
+            <el-table-column prop="name" label="报销名称" width="150" />
+            <el-table-column prop="receipt_no" label="报销单号" width="150" sortable />
+            <el-table-column prop="status" label="状态" width="160">
+              <template #default="scope">
+                <el-select
+                  v-model="scope.row.status"
+                  size="small"
+                  @change="(val) => handleStatusChange(scope.row, val)"
+                >
+                  <el-option
+                    v-for="status in statusSelectOptions"
+                    :key="status"
+                    :label="status"
+                    :value="status"
+                  />
+                </el-select>
+              </template>
+            </el-table-column>
+            <el-table-column prop="category" label="类别" width="100" />
+            <el-table-column prop="amount" label="金额" width="120">
+              <template #default="scope">
+                ¥ {{ scope.row.amount.toFixed(2) }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="description" label="备注" />
+            <el-table-column label="凭证" width="300">
+              <template #default="scope">
+                <div class="proof-buttons">
+                  <el-badge :value="getProofCount(getProofByType(scope.row, 'physical_photo'))" :hidden="!getProofCount(getProofByType(scope.row, 'physical_photo'))" type="primary">
+                    <el-button
+                      size="small"
+                      type="primary"
+                      plain
+                      @click="viewProofs(getProofByType(scope.row, 'physical_photo'), '实物照片')"
+                      :disabled="!getProofCount(getProofByType(scope.row, 'physical_photo'))"
+                    >
+                      实物
+                    </el-button>
+                  </el-badge>
+                  <el-badge :value="getProofCount(getProofByType(scope.row, 'electronic_invoice'))" :hidden="!getProofCount(getProofByType(scope.row, 'electronic_invoice'))" type="success">
+                    <el-button
+                      size="small"
+                      type="success"
+                      plain
+                      @click="viewProofs(getProofByType(scope.row, 'electronic_invoice'), '电子发票')"
+                      :disabled="!getProofCount(getProofByType(scope.row, 'electronic_invoice'))"
+                    >
+                      发票
+                    </el-button>
+                  </el-badge>
+                  <el-badge :value="getProofCount(getProofByType(scope.row, 'payment_screenshot'))" :hidden="!getProofCount(getProofByType(scope.row, 'payment_screenshot'))" type="warning">
+                    <el-button
+                      size="small"
+                      type="warning"
+                      plain
+                      @click="viewProofs(getProofByType(scope.row, 'payment_screenshot'), '支付截图')"
+                      :disabled="!getProofCount(getProofByType(scope.row, 'payment_screenshot'))"
+                    >
+                      支付
+                    </el-button>
+                  </el-badge>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="280">
+              <template #default="scope">
+                <el-button-group>
+                  <el-button
+                    size="small"
+                    type="primary"
+                    icon="Edit"
+                    @click="handleEdit(scope.row)"
+                  >修改</el-button>
+                  <el-button
+                    size="small"
+                    type="primary"
+                    :icon="DocumentCopy"
+                    @click="handleCopy(scope.row)"
+                  >复制</el-button>
+                  <el-button
+                    size="small"
+                    type="primary"
+                    icon="Upload"
+                    @click="handleUpload(scope.row)"
+                  >补交</el-button>
+                  <el-button
+                    size="small"
+                    type="danger"
+                    icon="Delete"
+                    @click="handleDelete(scope.row)"
+                  >删除</el-button>
+                </el-button-group>
+              </template>
+            </el-table-column>
+          </el-table>
+
+          <div class="status-pagination" v-if="group.total > pageSize">
+            <el-pagination
+              layout="total, prev, pager, next, jumper"
+              :total="group.total"
+              :page-size="pageSize"
+              :current-page="group.currentPage"
+              @current-change="(page) => handleGroupPageChange(group.status, page)"
+            />
           </div>
-        </template>
-      </el-table-column>
-    <el-table-column label="操作" width="280">
-        <template #default="scope">
-          <el-button-group>
-            <el-button
-              size="small"
-              type="primary"
-              icon="Edit"
-              @click="handleEdit(scope.row)"
-            >修改</el-button>
-            <el-button
-              size="small"
-              type="primary"
-              :icon="DocumentCopy"
-              @click="handleCopy(scope.row)"
-            >复制</el-button>
-            <el-button
-              size="small"
-              type="primary"
-              icon="Upload"
-              @click="handleUpload(scope.row)"
-            >补交</el-button>
-            <el-button 
-              size="small" 
-              type="danger" 
-              icon="Delete"
-              @click="handleDelete(scope.row)"
-            >删除</el-button>
-          </el-button-group>
-        </template>
-      </el-table-column>
-    </el-table>
+        </div>
+      </template>
+      <el-empty v-else description="暂无符合条件的报销记录" />
+    </div>
     
     <el-dialog v-model="viewDialogVisible" :title="viewDialogTitle" width="600px">
       <div v-if="viewFiles.length === 0" class="no-files">暂无凭证</div>
@@ -398,7 +449,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed } from 'vue';
+import { ref, reactive, onMounted, computed, watch } from 'vue';
 import { ElMessage, ElMessageBox, ElLoading } from 'element-plus';
 import { Delete, Upload, Close, DocumentCopy } from '@element-plus/icons-vue';
 import dayjs from 'dayjs';
@@ -408,7 +459,12 @@ dayjs.extend(isBetween);
 
 const tableData = ref([]);
 const loading = ref(false);
-const selectedRows = ref([]);
+const selectedRowIds = ref([]);
+const showCompleted = ref(false);
+const pageSize = ref(10);
+const groupPages = ref({});
+const groupedStatusData = ref({});
+const statusLoadingMap = ref({});
 const uploadDialogVisible = ref(false);
 const editDialogVisible = ref(false);
 const copyDialogVisible = ref(false);
@@ -420,9 +476,12 @@ const claimForm = ref({
   approval_date: dayjs().format('YYYY-MM-DD')
 });
 
-const selectedTotalAmount = computed(() => {
-  return selectedRows.value.reduce((sum, row) => sum + (row.amount || 0), 0);
+const selectedRows = computed(() => {
+  const selectedIdSet = new Set(selectedRowIds.value);
+  return tableData.value.filter(row => selectedIdSet.has(row.id));
 });
+
+const selectedTotalAmount = computed(() => selectedRows.value.reduce((sum, row) => sum + (row.amount || 0), 0));
 
 const openClaimDialog = () => {
   if (selectedRows.value.length === 0) return;
@@ -519,6 +578,7 @@ const filters = ref({
 
 const statusOrder = ref([]);
 const categoryOrder = ref([]);
+const defaultStatusOrder = ['待提交', '审批中', '待审核', '待报销', '待打款', '待闭环', '已批准', '已拒绝', '材料不齐', '已完成'];
 
 const loadSortOrders = async () => {
   try {
@@ -535,7 +595,18 @@ const uniqueCategories = computed(() => {
   return Array.from(categories);
 });
 
-const filteredTableData = computed(() => {
+const statusFilterOptions = computed(() => {
+  const fromData = tableData.value.map(item => item.status).filter(Boolean);
+  const merged = Array.from(new Set([...defaultStatusOrder, ...statusOrder.value, ...fromData]));
+  return merged;
+});
+
+const statusSelectOptions = computed(() => {
+  const fromData = tableData.value.map(item => item.status).filter(Boolean);
+  return Array.from(new Set([...defaultStatusOrder, ...statusOrder.value, ...fromData]));
+});
+
+const filteredAndSortedData = computed(() => {
   const filtered = tableData.value.filter(item => {
     // Name filter
     if (filters.value.name && (!item.name || !item.name.includes(filters.value.name))) return false;
@@ -590,8 +661,104 @@ const filteredTableData = computed(() => {
   });
 });
 
-const handleSelectionChange = (val) => {
-  selectedRows.value = val;
+const getStatusIndex = (status) => {
+  const index = statusOrder.value.indexOf(status);
+  if (index !== -1) return index;
+  const fallback = defaultStatusOrder.indexOf(status);
+  return fallback !== -1 ? fallback : 999;
+};
+
+const sortStatuses = (statuses) => {
+  return [...statuses].sort((a, b) => getStatusIndex(a) - getStatusIndex(b));
+};
+
+const rebuildGroupedStatusData = async () => {
+  const grouped = filteredAndSortedData.value.reduce((acc, row) => {
+    const status = row.status || '未分类';
+    if (!acc[status]) acc[status] = [];
+    acc[status].push(row);
+    return acc;
+  }, {});
+
+  const allStatuses = sortStatuses(Array.from(new Set([...Object.keys(grouped)])));
+  const nextGrouped = {};
+  const nextLoading = {};
+
+  allStatuses.forEach((status) => {
+    nextLoading[status] = true;
+    if (!groupPages.value[status]) {
+      groupPages.value[status] = 1;
+    }
+  });
+
+  statusLoadingMap.value = nextLoading;
+  groupedStatusData.value = {};
+
+  for (const status of allStatuses) {
+    await new Promise(resolve => setTimeout(resolve, 0));
+    nextGrouped[status] = grouped[status] || [];
+    groupedStatusData.value = { ...groupedStatusData.value, [status]: nextGrouped[status] };
+    statusLoadingMap.value = { ...statusLoadingMap.value, [status]: false };
+  }
+};
+
+const isCompletedStatus = (status) => status === '已完成';
+
+const getStatusColor = (status) => {
+  if (status === '待提交') return 'blue';
+  if (['审批中', '待审核', '待打款', '待报销', '待闭环'].includes(status)) return 'orange';
+  if (status === '已批准') return 'green';
+  if (['已拒绝', '材料不齐'].includes(status)) return 'red';
+  if (status === '已完成') return 'gray';
+  return 'blue';
+};
+
+const getStatusTagType = (status) => {
+  const color = getStatusColor(status);
+  if (color === 'orange') return 'warning';
+  if (color === 'green') return 'success';
+  if (color === 'red') return 'danger';
+  if (color === 'gray') return 'info';
+  return 'primary';
+};
+
+const statusGroups = computed(() => {
+  const groups = sortStatuses(Object.keys(groupedStatusData.value))
+    .filter(status => showCompleted.value || !isCompletedStatus(status))
+    .filter(status => !filters.value.status || status === filters.value.status)
+    .map((status) => {
+      const rows = groupedStatusData.value[status] || [];
+      const totalPages = Math.max(1, Math.ceil(rows.length / pageSize.value));
+      const currentPage = Math.min(groupPages.value[status] || 1, totalPages);
+      const start = (currentPage - 1) * pageSize.value;
+      const end = start + pageSize.value;
+
+      return {
+        status,
+        loading: statusLoadingMap.value[status],
+        total: rows.length,
+        currentPage,
+        pageData: rows.slice(start, end)
+      };
+    });
+
+  return groups;
+});
+
+const handleGroupPageChange = (status, page) => {
+  groupPages.value = { ...groupPages.value, [status]: page };
+};
+
+const isRowSelected = (id) => selectedRowIds.value.includes(id);
+
+const toggleRowSelection = (id, checked) => {
+  const idSet = new Set(selectedRowIds.value);
+  if (checked) {
+    idSet.add(id);
+  } else {
+    idSet.delete(id);
+  }
+  selectedRowIds.value = Array.from(idSet);
 };
 
 const formatTime = (timestamp) => {
@@ -604,6 +771,7 @@ const fetchData = async () => {
     await loadSortOrders();
     const data = await window.api.getReimbursements();
     tableData.value = data;
+    selectedRowIds.value = selectedRowIds.value.filter(id => data.some(item => item.id === id));
   } catch (error) {
     ElMessage.error('获取数据失败: ' + error.message);
   } finally {
@@ -746,6 +914,13 @@ const getProofCount = (proofs) => {
   if (!proofs) return 0;
   if (Array.isArray(proofs)) return proofs.length;
   return 1;
+};
+
+const getProofByType = (row, type) => {
+  if (!row || !row.proofs || typeof row.proofs !== 'object') return [];
+  const value = row.proofs[type];
+  if (!value) return [];
+  return value;
 };
 
 const viewProofs = (proofs, title) => {
@@ -915,6 +1090,10 @@ const openFile = async (path) => {
   }
 };
 
+watch([filteredAndSortedData, pageSize], async () => {
+  await rebuildGroupedStatusData();
+}, { immediate: true });
+
 onMounted(() => {
   fetchData();
 });
@@ -938,6 +1117,58 @@ defineExpose({ fetchData });
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+}
+.actions-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.grouped-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.status-group-card {
+  border-radius: 8px;
+  border: 1px solid #dcdfe6;
+  padding: 12px;
+  background: #fff;
+}
+.status-group-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.status-group-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.status-group-count {
+  color: #606266;
+  font-size: 13px;
+}
+.status-group-blue {
+  border-left: 4px solid #1d4ed8;
+}
+.status-group-orange {
+  border-left: 4px solid #b45309;
+}
+.status-group-green {
+  border-left: 4px solid #15803d;
+}
+.status-group-red {
+  border-left: 4px solid #b91c1c;
+}
+.status-group-gray {
+  border-left: 4px solid #4b5563;
+}
+.status-pagination {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
 }
 .expand-content {
   padding: 20px;

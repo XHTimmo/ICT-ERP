@@ -548,6 +548,165 @@ function setupIPC(mainWindow) {
     }
   });
 
+  // Export ZIP
+  ipcMain.handle('export-zip', async (event, reimbursementIds) => {
+    console.log('--- EXPORT ZIP STARTED ---');
+    console.log('IDs:', reimbursementIds);
+    try {
+      let storagePath = store.get('storagePath');
+      console.log('Storage path (from store):', storagePath);
+      
+      if (!storagePath) {
+        // Fallback to Downloads
+        storagePath = app.getPath('downloads');
+        console.log('Storage path missing, using Downloads:', storagePath);
+      }
+      
+      // Ensure storage path exists
+      if (!await fs.pathExists(storagePath)) {
+        console.error('Storage path does not exist on disk:', storagePath);
+        try {
+          await fs.ensureDir(storagePath);
+          console.log('Created missing directory:', storagePath);
+        } catch (e) {
+          storagePath = app.getPath('downloads');
+          console.warn('Failed to create storage path, fallback to Downloads:', storagePath);
+        }
+      }
+
+      console.log('Preparing file path...');
+      
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const filename = `reimbursements_export_${timestamp}.zip`;
+      const filePath = path.join(storagePath, filename);
+      
+      console.log('Exporting directly to:', filePath);
+      
+      await new Promise((resolve, reject) => {
+        const output = createWriteStream(filePath);
+        const archive = archiver('zip', { zlib: { level: 9 } });
+        
+        output.on('close', function() {
+          console.log(archive.pointer() + ' total bytes');
+          console.log('archiver has been finalized and the output file descriptor has closed.');
+          resolve();
+        });
+        
+        output.on('error', function(err) {
+          console.error('Output stream error:', err);
+          reject(err);
+        });
+        
+        archive.on('warning', function(err) {
+          if (err.code === 'ENOENT') {
+            console.warn('Archiver warning:', err);
+          } else {
+            console.error('Archiver error:', err);
+            reject(err);
+          }
+        });
+        
+        archive.on('error', function(err) {
+          console.error('Archiver fatal error:', err);
+          reject(err);
+        });
+    
+        archive.pipe(output);
+        
+        const reimbursements = getReimbursements().filter(r => reimbursementIds.includes(r.id));
+        console.log('Reimbursements to export:', reimbursements.length);
+        
+        // Generate CSV Manifest
+        const csvHeader = 'ID,序号,报销单号,日期,报销名称,金额,类别,状态,备注,实物照片,电子发票,支付截图\n';
+        const csvRows = reimbursements.map(r => {
+          let proofs = r.proofs || {};
+          if (typeof proofs === 'string') {
+            try { proofs = JSON.parse(proofs); } catch(e) {}
+          }
+          
+          const safeName = (r.name || '').replace(/"/g, '""');
+          const safeDesc = (r.description || '').replace(/"/g, '""');
+          const receiptNo = (r.receipt_no || '').replace(/"/g, '""');
+          
+          const getBaseNames = (p) => {
+             if (!p) return '';
+             if (Array.isArray(p)) return p.map(f => path.basename(f)).join('; ');
+             return path.basename(p);
+          };
+
+          const pPhoto = getBaseNames(proofs.physical_photo);
+          const eInvoice = getBaseNames(proofs.electronic_invoice);
+          const pScreenshot = getBaseNames(proofs.payment_screenshot);
+          
+          return `"${r.id}","${r.serial_no || ''}","${receiptNo}","${r.date}","${safeName}","${r.amount}","${r.category}","${r.status}","${safeDesc}","${pPhoto}","${eInvoice}","${pScreenshot}"`;
+        }).join('\n');
+        
+        archive.append('\uFEFF' + csvHeader + csvRows, { name: 'manifest.csv' });
+        
+        // Add files
+        (async () => {
+          try {
+            for (const r of reimbursements) {
+              let proofs = r.proofs || {};
+              if (typeof proofs === 'string') {
+                try { proofs = JSON.parse(proofs); } catch(e) {}
+              }
+
+              const safeName = (r.name || '未命名').replace(/[\\/:*?"<>|]/g, '_');
+              const folderName = `${r.date}_${safeName}_${r.amount}`;
+              
+              const addProofFiles = async (files, prefix) => {
+                if (!files) return;
+                const fileList = Array.isArray(files) ? files : [files];
+                
+                for (let i = 0; i < fileList.length; i++) {
+                  let fPath = fileList[i];
+                  if (!fPath) continue;
+                  
+                  if (!path.isAbsolute(fPath)) {
+                    fPath = path.join(storagePath, fPath);
+                  }
+
+                  if (await fs.pathExists(fPath)) {
+                    archive.file(fPath, { name: `${folderName}/${prefix}_${path.basename(fPath)}` });
+                  }
+                }
+              };
+
+              await addProofFiles(proofs.physical_photo, 'physical');
+              await addProofFiles(proofs.electronic_invoice, 'invoice');
+              await addProofFiles(proofs.payment_screenshot, 'payment');
+            }
+            
+            console.log('Finalizing archive...');
+            await archive.finalize();
+          } catch (err) {
+            reject(err);
+          }
+        })();
+      });
+      
+      console.log('Archive finalized successfully');
+      
+      return { success: true, filePath };
+      
+    } catch (error) {
+      console.error('--- EXPORT FAILED ---');
+      console.error(error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Open File
+  ipcMain.handle('open-file', async (event, filePath) => {
+      const { shell } = require('electron');
+      if (await fs.pathExists(filePath)) {
+          await shell.openPath(filePath);
+          return true;
+      }
+      return false;
+  });
+
 }
 
 module.exports = { setupIPC };
